@@ -7,6 +7,7 @@ struct ContentView: View {
 	@State private var keyboardTest = ""
 	@State private var copiedImage: UIImage?
 	@State private var pasteboardChangeCount = UIPasteboard.general.changeCount
+	@FocusState private var keyboardTestFocused: Bool
 
 	private let pasteboardTimer = Timer.publish(every: 0.4, on: .main, in: .common).autoconnect()
 
@@ -29,6 +30,7 @@ struct ContentView: View {
 						TextField("Test keyboard input", text: $keyboardTest)
 							.textInputAutocapitalization(.never)
 							.autocorrectionDisabled()
+							.focused($keyboardTestFocused)
 
 						if let copiedImage {
 							Image(uiImage: copiedImage)
@@ -39,6 +41,8 @@ struct ContentView: View {
 								.accessibilityLabel("Copied meme preview")
 						}
 					}
+					.contentShape(Rectangle())
+					.simultaneousGesture(TapGesture().onEnded(focusKeyboardTestInput))
 				}
 
 				Section("Generation") {
@@ -71,5 +75,12 @@ struct ContentView: View {
 		guard force || pasteboard.changeCount != pasteboardChangeCount else { return }
 		pasteboardChangeCount = pasteboard.changeCount
 		copiedImage = pasteboard.image
+	}
+
+	private func focusKeyboardTestInput() {
+		keyboardTestFocused = false
+		DispatchQueue.main.async {
+			keyboardTestFocused = true
+		}
 	}
 }
