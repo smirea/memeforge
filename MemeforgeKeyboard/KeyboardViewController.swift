@@ -24,6 +24,9 @@ final class KeyboardViewController: UIInputViewController {
 	private let modeControl = UISegmentedControl(items: ["Search", "Generate"])
 	private let queryLabel = UILabel()
 	private let statusLabel = UILabel()
+	private let accessBox = UIView()
+	private let accessTitleLabel = UILabel()
+	private let accessDetailLabel = UILabel()
 	private let collectionView: UICollectionView
 
 	init() {
@@ -48,6 +51,11 @@ final class KeyboardViewController: UIInputViewController {
 		updatePrompt()
 	}
 
+	override func viewWillAppear(_ animated: Bool) {
+		super.viewWillAppear(animated)
+		updatePrompt()
+	}
+
 	private func buildInterface() {
 		modeControl.selectedSegmentIndex = Mode.search.rawValue
 		modeControl.addTarget(self, action: #selector(modeChanged), for: .valueChanged)
@@ -60,6 +68,20 @@ final class KeyboardViewController: UIInputViewController {
 		statusLabel.font = .systemFont(ofSize: 12, weight: .medium)
 		statusLabel.textColor = .secondaryLabel
 		statusLabel.numberOfLines = 1
+
+		accessTitleLabel.font = .systemFont(ofSize: 14, weight: .bold)
+		accessTitleLabel.textColor = .label
+		accessTitleLabel.text = "Full Access is off"
+
+		accessDetailLabel.font = .systemFont(ofSize: 11, weight: .medium)
+		accessDetailLabel.textColor = .secondaryLabel
+		accessDetailLabel.numberOfLines = 2
+		accessDetailLabel.text = "Open Memeforge, then enable Allow Full Access in Keyboard settings."
+
+		accessBox.backgroundColor = .systemBackground
+		accessBox.layer.cornerRadius = 8
+		accessBox.translatesAutoresizingMaskIntoConstraints = false
+		accessBox.heightAnchor.constraint(equalToConstant: 80).isActive = true
 
 		collectionView.backgroundColor = .clear
 		collectionView.dataSource = self
@@ -102,7 +124,35 @@ final class KeyboardViewController: UIInputViewController {
 		root.addArrangedSubview(queryBox)
 
 		root.addArrangedSubview(statusLabel)
+		root.addArrangedSubview(accessBox)
 		root.addArrangedSubview(collectionView)
+
+		let accessButton = UIButton(type: .system)
+		accessButton.setTitle("Open App", for: .normal)
+		accessButton.backgroundColor = .tertiarySystemBackground
+		accessButton.tintColor = .label
+		accessButton.layer.cornerRadius = 8
+		accessButton.titleLabel?.font = .systemFont(ofSize: 13, weight: .bold)
+		accessButton.widthAnchor.constraint(equalToConstant: 88).isActive = true
+		accessButton.heightAnchor.constraint(equalToConstant: 32).isActive = true
+		accessButton.addTarget(self, action: #selector(openSetupApp), for: .touchUpInside)
+
+		let accessTextStack = UIStackView(arrangedSubviews: [accessTitleLabel, accessDetailLabel])
+		accessTextStack.axis = .vertical
+		accessTextStack.spacing = 2
+
+		let accessRow = UIStackView(arrangedSubviews: [accessTextStack, accessButton])
+		accessRow.axis = .horizontal
+		accessRow.spacing = 8
+		accessRow.alignment = .center
+		accessRow.translatesAutoresizingMaskIntoConstraints = false
+		accessBox.addSubview(accessRow)
+		NSLayoutConstraint.activate([
+			accessRow.leadingAnchor.constraint(equalTo: accessBox.leadingAnchor, constant: 12),
+			accessRow.trailingAnchor.constraint(equalTo: accessBox.trailingAnchor, constant: -12),
+			accessRow.topAnchor.constraint(equalTo: accessBox.topAnchor, constant: 8),
+			accessRow.bottomAnchor.constraint(equalTo: accessBox.bottomAnchor, constant: -8),
+		])
 
 		let actionRow = UIStackView(arrangedSubviews: [
 			actionButton("Search", action: #selector(runSearch)),
@@ -222,6 +272,15 @@ final class KeyboardViewController: UIInputViewController {
 		advanceToNextInputMode()
 	}
 
+	@objc private func openSetupApp() {
+		guard let url = URL(string: "memeforge://setup") else { return }
+		extensionContext?.open(url) { [weak self] success in
+			if !success {
+				self?.finish("Open Memeforge, then enable Full Access.")
+			}
+		}
+	}
+
 	@objc private func goTapped() {
 		switch mode {
 		case .search:
@@ -246,8 +305,10 @@ final class KeyboardViewController: UIInputViewController {
 	private func updatePrompt() {
 		let placeholder = mode == .search ? "type a meme search" : "describe a static meme"
 		queryLabel.text = query.isEmpty ? placeholder : query
+		accessBox.isHidden = hasFullAccess
+		collectionView.isHidden = !hasFullAccess
 		if !hasFullAccess {
-			statusLabel.text = "Allow Full Access is required for network calls."
+			statusLabel.text = "Results need Full Access."
 		} else if statusLabel.text?.isEmpty != false {
 			statusLabel.text = mode == .search ? "Search copies static GIPHY stills." : "Generated images copy as PNG."
 		}
@@ -256,7 +317,8 @@ final class KeyboardViewController: UIInputViewController {
 	private func search() {
 		let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
 		guard hasFullAccess else {
-			statusLabel.text = "Enable Allow Full Access first."
+			updatePrompt()
+			statusLabel.text = "Open Memeforge for setup steps."
 			return
 		}
 		guard !SharedSettings.giphyAPIKey.isEmpty else {
@@ -320,7 +382,8 @@ final class KeyboardViewController: UIInputViewController {
 	private func generate() {
 		let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
 		guard hasFullAccess else {
-			statusLabel.text = "Enable Allow Full Access first."
+			updatePrompt()
+			statusLabel.text = "Open Memeforge for setup steps."
 			return
 		}
 		guard !SharedSettings.geminiAPIKey.isEmpty else {
@@ -401,7 +464,8 @@ final class KeyboardViewController: UIInputViewController {
 
 	private func copy(_ result: MemeResult) {
 		guard hasFullAccess else {
-			statusLabel.text = "Enable Allow Full Access first."
+			updatePrompt()
+			statusLabel.text = "Open Memeforge for setup steps."
 			return
 		}
 

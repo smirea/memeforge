@@ -23,16 +23,19 @@ struct ContentView: View {
 					}
 				}
 
-				Section("Keyboard") {
-					Label("Enable Memeforge in Settings > General > Keyboard > Keyboards.", systemImage: "keyboard")
-					Label("Turn on Allow Full Access so search and generation can use the network.", systemImage: "network")
-					TextField("Test keyboard input", text: $keyboardTest)
-						.textInputAutocapitalization(.never)
-						.autocorrectionDisabled()
-					Button("Open App Settings") {
+				Section("Full Access") {
+					Label("Settings > General > Keyboard > Keyboards > Memeforge", systemImage: "keyboard")
+					Label("Turn on Allow Full Access", systemImage: "network")
+					Button("Open Settings") {
 						guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
 						UIApplication.shared.open(url)
 					}
+				}
+
+				Section("Keyboard Test") {
+					TextField("Test keyboard input", text: $keyboardTest)
+						.textInputAutocapitalization(.never)
+						.autocorrectionDisabled()
 				}
 
 				Section("Generation") {
