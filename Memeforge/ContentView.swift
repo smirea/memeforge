@@ -57,6 +57,10 @@ struct ContentView: View {
 			.onReceive(previewTimer) { _ in
 				refreshCopiedImage()
 			}
+			.onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+				refreshPermissionState()
+				refreshCopiedImage(force: true)
+			}
 			.onChange(of: scenePhase) { _, phase in
 				if phase == .active {
 					refreshPermissionState()

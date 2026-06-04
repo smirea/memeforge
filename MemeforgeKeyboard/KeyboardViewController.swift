@@ -42,7 +42,6 @@ final class KeyboardViewController: UIInputViewController {
 	private let topRowHeight: CGFloat = 30
 	private let queryBoxHeight: CGFloat = 34
 	private let accessBoxHeight: CGFloat = 80
-	private let loadingCollectionHeight: CGFloat = 112
 	private let maxSearchCollectionHeight: CGFloat = 320
 	private let generatedStyles = [
 		"Classic photographic meme style.",
@@ -511,11 +510,14 @@ final class KeyboardViewController: UIInputViewController {
 		switch mode {
 		case .generate:
 			if results.isEmpty {
-				return pendingGenerationCount > 0 ? loadingCollectionHeight : 0
+				return pendingGenerationCount > 0 ? collectionContentHeight(rows: 1, side: side) : 0
 			}
 			let rows = ceil(CGFloat(results.count) / 2)
 			return collectionContentHeight(rows: rows, side: side)
 		case .search:
+			if isLoadingSearchResults, results.isEmpty, !typingControlsVisible {
+				return maxSearchCollectionHeight
+			}
 			guard !results.isEmpty else { return 0 }
 			let rows = ceil(CGFloat(results.count) / 3)
 			let contentHeight = collectionContentHeight(rows: rows, side: side)
@@ -584,7 +586,7 @@ final class KeyboardViewController: UIInputViewController {
 		searchQuery = trimmed
 		searchOffset = 0
 		canLoadMoreSearchResults = true
-		isLoadingSearchResults = false
+		isLoadingSearchResults = true
 		setGenerating(false)
 		results = []
 		collectionView.reloadData()
@@ -600,6 +602,7 @@ final class KeyboardViewController: UIInputViewController {
 
 	private func fetchSearchResults(for searchQuery: String, offset: Int, replacingResults: Bool) {
 		isLoadingSearchResults = true
+		updateContainerSizing()
 
 		var components = URLComponents(string: "https://api.giphy.com/v1/gifs/search")
 		components?.queryItems = [
@@ -693,7 +696,7 @@ final class KeyboardViewController: UIInputViewController {
 		setTypingControlsVisible(false)
 		setGenerating(true)
 
-		let url = URL(string: "https://generativelanguage.googleapis.com/v1/models/\(SharedSettings.geminiModel):generateContent")!
+		let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(SharedSettings.geminiModel):generateContent")!
 		for style in generatedStyles {
 			var request = URLRequest(url: url)
 			request.httpMethod = "POST"
@@ -734,6 +737,9 @@ final class KeyboardViewController: UIInputViewController {
 						["text": idea],
 					],
 				],
+			],
+			"generationConfig": [
+				"responseModalities": ["IMAGE"],
 			],
 		]
 		return try? JSONSerialization.data(withJSONObject: body)
