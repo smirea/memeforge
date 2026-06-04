@@ -62,6 +62,8 @@ final class KeyboardViewController: UIInputViewController {
 	private let maxQueryBoxLines: CGFloat = 5
 	private let queryBoxHorizontalPadding: CGFloat = 12
 	private let queryBoxVerticalPadding: CGFloat = 7
+	private let queryClearButtonSize: CGFloat = 22
+	private let queryClearButtonSpacing: CGFloat = 4
 	private let accessBoxHeight: CGFloat = 80
 	private let maxSearchCollectionHeight: CGFloat = 320
 	private let generatedStyles = [
@@ -72,6 +74,7 @@ final class KeyboardViewController: UIInputViewController {
 	private let modeControl = UISegmentedControl(items: ["Search", "Generate"])
 	private let queryLabel = UILabel()
 	private let queryBox = UIControl()
+	private let queryClearButton = UIButton(type: .system)
 	private let accessBox = UIView()
 	private let accessTitleLabel = UILabel()
 	private let accessDetailLabel = UILabel()
@@ -187,12 +190,22 @@ final class KeyboardViewController: UIInputViewController {
 		queryBoxHeightConstraint?.isActive = true
 		queryBox.addTarget(self, action: #selector(focusQuery), for: .touchUpInside)
 		queryBox.addSubview(queryLabel)
+		queryClearButton.setImage(UIImage(systemName: "xmark.circle.fill"), for: .normal)
+		queryClearButton.accessibilityLabel = "Clear input"
+		queryClearButton.isHidden = true
+		queryClearButton.addTarget(self, action: #selector(clearQuery), for: .touchUpInside)
+		queryBox.addSubview(queryClearButton)
 		queryLabel.translatesAutoresizingMaskIntoConstraints = false
+		queryClearButton.translatesAutoresizingMaskIntoConstraints = false
 		NSLayoutConstraint.activate([
 			queryLabel.leadingAnchor.constraint(equalTo: queryBox.leadingAnchor, constant: queryBoxHorizontalPadding),
-			queryLabel.trailingAnchor.constraint(equalTo: queryBox.trailingAnchor, constant: -queryBoxHorizontalPadding),
+			queryLabel.trailingAnchor.constraint(equalTo: queryClearButton.leadingAnchor, constant: -queryClearButtonSpacing),
 			queryLabel.topAnchor.constraint(equalTo: queryBox.topAnchor, constant: queryBoxVerticalPadding),
 			queryLabel.bottomAnchor.constraint(equalTo: queryBox.bottomAnchor, constant: -queryBoxVerticalPadding),
+			queryClearButton.trailingAnchor.constraint(equalTo: queryBox.trailingAnchor, constant: -queryClearButtonSpacing),
+			queryClearButton.topAnchor.constraint(equalTo: queryBox.topAnchor, constant: queryClearButtonSpacing),
+			queryClearButton.widthAnchor.constraint(equalToConstant: queryClearButtonSize),
+			queryClearButton.heightAnchor.constraint(equalToConstant: queryClearButtonSize),
 		])
 		rootStack.addArrangedSubview(queryBox)
 
@@ -519,6 +532,7 @@ final class KeyboardViewController: UIInputViewController {
 		keyboardRestoreButton.tintColor = textColor
 		closeButton.backgroundColor = isDark ? systemColor : .tertiarySystemBackground
 		closeButton.tintColor = textColor
+		queryClearButton.tintColor = isDark ? UIColor(white: 0.75, alpha: 1) : UIColor.secondaryLabel
 		loadingIndicator.color = isDark ? .white : .secondaryLabel
 		applyQueryInputFocus(animated: false)
 		updateAlphabetKeyTitles()
@@ -642,6 +656,7 @@ final class KeyboardViewController: UIInputViewController {
 		let placeholder = mode == .search ? "type a meme search" : "describe a static meme"
 		queryLabel.text = query.isEmpty ? placeholder : query
 		queryLabel.textColor = query.isEmpty ? .secondaryLabel : .label
+		queryClearButton.isHidden = query.isEmpty
 		SharedSettings.keyboardHasFullAccess = hasFullAccess
 		accessBox.isHidden = hasFullAccess
 		updateQueryBoxHeight()
@@ -693,7 +708,7 @@ final class KeyboardViewController: UIInputViewController {
 	private func updateQueryBoxHeight() {
 		let fallbackWidth = view.bounds.width - view.safeAreaInsets.left - view.safeAreaInsets.right - 16
 		let boxWidth = queryBox.bounds.width > 0 ? queryBox.bounds.width : fallbackWidth
-		let textWidth = max(0, boxWidth - queryBoxHorizontalPadding * 2)
+		let textWidth = max(0, boxWidth - queryBoxHorizontalPadding - queryClearButtonSize - queryClearButtonSpacing * 2)
 		let measuredHeight = queryLabel.sizeThatFits(CGSize(width: textWidth, height: .greatestFiniteMagnitude)).height
 		let maxHeight = queryLabel.font.lineHeight * maxQueryBoxLines + queryBoxVerticalPadding * 2
 		let height = ceil(min(max(measuredHeight + queryBoxVerticalPadding * 2, minQueryBoxHeight), maxHeight))
