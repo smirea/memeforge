@@ -64,6 +64,9 @@ final class KeyboardViewController: UIInputViewController {
 	private let queryBoxVerticalPadding: CGFloat = 7
 	private let queryClearButtonSize: CGFloat = 22
 	private let queryClearButtonSpacing: CGFloat = 4
+	private var queryClearButtonTopOffset: CGFloat {
+		queryBoxVerticalPadding + (queryLabel.font.lineHeight - queryClearButtonSize) / 2
+	}
 	private let accessBoxHeight: CGFloat = 80
 	private let maxSearchCollectionHeight: CGFloat = 320
 	private let generatedStyles = [
@@ -203,7 +206,7 @@ final class KeyboardViewController: UIInputViewController {
 			queryLabel.topAnchor.constraint(equalTo: queryBox.topAnchor, constant: queryBoxVerticalPadding),
 			queryLabel.bottomAnchor.constraint(equalTo: queryBox.bottomAnchor, constant: -queryBoxVerticalPadding),
 			queryClearButton.trailingAnchor.constraint(equalTo: queryBox.trailingAnchor, constant: -queryClearButtonSpacing),
-			queryClearButton.topAnchor.constraint(equalTo: queryBox.topAnchor, constant: queryClearButtonSpacing),
+			queryClearButton.topAnchor.constraint(equalTo: queryBox.topAnchor, constant: queryClearButtonTopOffset),
 			queryClearButton.widthAnchor.constraint(equalToConstant: queryClearButtonSize),
 			queryClearButton.heightAnchor.constraint(equalToConstant: queryClearButtonSize),
 		])
