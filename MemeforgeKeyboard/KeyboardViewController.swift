@@ -324,7 +324,7 @@ final class KeyboardViewController: UIInputViewController {
 			return
 		}
 		guard !SharedSettings.giphyAPIKey.isEmpty else {
-			setStatus("Add a GIPHY key in Memeforge.")
+			setStatus("Missing GIPHY key in local build settings.")
 			return
 		}
 		guard !trimmed.isEmpty else {
@@ -389,7 +389,7 @@ final class KeyboardViewController: UIInputViewController {
 			return
 		}
 		guard !SharedSettings.geminiAPIKey.isEmpty else {
-			setStatus("Add a Gemini key in Memeforge.")
+			setStatus("Missing Gemini key in local build settings.")
 			return
 		}
 		guard !trimmed.isEmpty else {
