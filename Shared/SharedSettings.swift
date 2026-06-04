@@ -6,6 +6,7 @@ enum SharedSettings {
 
 	private static let giphyKey = "giphyAPIKey"
 	private static let geminiKey = "geminiAPIKey"
+	private static let keyboardFullAccessKey = "keyboardHasFullAccess"
 
 	static var store: UserDefaults {
 		UserDefaults(suiteName: appGroupID) ?? .standard
@@ -19,6 +20,11 @@ enum SharedSettings {
 	static var geminiAPIKey: String {
 		get { storedValue(forKey: geminiKey) ?? bundledValue(forInfoKey: "MemeforgeGeminiAPIKey") }
 		set { store.set(newValue.trimmingCharacters(in: .whitespacesAndNewlines), forKey: geminiKey) }
+	}
+
+	static var keyboardHasFullAccess: Bool {
+		get { store.bool(forKey: keyboardFullAccessKey) }
+		set { store.set(newValue, forKey: keyboardFullAccessKey) }
 	}
 
 	private static func storedValue(forKey key: String) -> String? {

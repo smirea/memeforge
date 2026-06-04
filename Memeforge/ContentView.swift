@@ -1,8 +1,10 @@
 import SwiftUI
 
 struct ContentView: View {
+	@Environment(\.scenePhase) private var scenePhase
 	@State private var giphyAPIKey = SharedSettings.giphyAPIKey
 	@State private var geminiAPIKey = SharedSettings.geminiAPIKey
+	@State private var keyboardHasFullAccess = SharedSettings.keyboardHasFullAccess
 	@State private var keyboardTest = ""
 	@State private var saved = false
 
@@ -23,12 +25,14 @@ struct ContentView: View {
 					}
 				}
 
-				Section("Full Access") {
-					Label("Settings > General > Keyboard > Keyboards > Memeforge", systemImage: "keyboard")
-					Label("Turn on Allow Full Access", systemImage: "network")
-					Button("Open Settings") {
-						guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
-						UIApplication.shared.open(url)
+				if !keyboardHasFullAccess {
+					Section("Full Access") {
+						Button("Open Settings") {
+							guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+							UIApplication.shared.open(url)
+						}
+						Text("Go to General > Keyboard > Keyboards > Memeforge and turn on Allow Full Access.")
+							.foregroundStyle(.secondary)
 					}
 				}
 
@@ -43,8 +47,18 @@ struct ContentView: View {
 				}
 			}
 			.navigationTitle("Memeforge")
+			.onAppear(perform: refreshPermissionState)
 			.onChange(of: giphyAPIKey) { _, _ in saved = false }
 			.onChange(of: geminiAPIKey) { _, _ in saved = false }
+			.onChange(of: scenePhase) { _, phase in
+				if phase == .active {
+					refreshPermissionState()
+				}
+			}
 		}
+	}
+
+	private func refreshPermissionState() {
+		keyboardHasFullAccess = SharedSettings.keyboardHasFullAccess
 	}
 }
