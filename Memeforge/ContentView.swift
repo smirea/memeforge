@@ -1,9 +1,14 @@
 import SwiftUI
+import UIKit
 
 struct ContentView: View {
 	@Environment(\.scenePhase) private var scenePhase
 	@State private var keyboardHasFullAccess = SharedSettings.keyboardHasFullAccess
 	@State private var keyboardTest = ""
+	@State private var copiedImage: UIImage?
+	@State private var pasteboardChangeCount = UIPasteboard.general.changeCount
+
+	private let pasteboardTimer = Timer.publish(every: 0.4, on: .main, in: .common).autoconnect()
 
 	var body: some View {
 		NavigationStack {
@@ -20,9 +25,20 @@ struct ContentView: View {
 				}
 
 				Section("Keyboard Test") {
-					TextField("Test keyboard input", text: $keyboardTest)
-						.textInputAutocapitalization(.never)
-						.autocorrectionDisabled()
+					HStack(spacing: 12) {
+						TextField("Test keyboard input", text: $keyboardTest)
+							.textInputAutocapitalization(.never)
+							.autocorrectionDisabled()
+
+						if let copiedImage {
+							Image(uiImage: copiedImage)
+								.resizable()
+								.scaledToFill()
+								.frame(width: 64, height: 64)
+								.clipShape(RoundedRectangle(cornerRadius: 8))
+								.accessibilityLabel("Copied meme preview")
+						}
+					}
 				}
 
 				Section("Generation") {
@@ -30,10 +46,17 @@ struct ContentView: View {
 				}
 			}
 			.navigationTitle("Memeforge")
-			.onAppear(perform: refreshPermissionState)
+			.onAppear {
+				refreshPermissionState()
+				refreshCopiedImage(force: true)
+			}
+			.onReceive(pasteboardTimer) { _ in
+				refreshCopiedImage()
+			}
 			.onChange(of: scenePhase) { _, phase in
 				if phase == .active {
 					refreshPermissionState()
+					refreshCopiedImage(force: true)
 				}
 			}
 		}
@@ -41,5 +64,12 @@ struct ContentView: View {
 
 	private func refreshPermissionState() {
 		keyboardHasFullAccess = SharedSettings.keyboardHasFullAccess
+	}
+
+	private func refreshCopiedImage(force: Bool = false) {
+		let pasteboard = UIPasteboard.general
+		guard force || pasteboard.changeCount != pasteboardChangeCount else { return }
+		pasteboardChangeCount = pasteboard.changeCount
+		copiedImage = pasteboard.image
 	}
 }

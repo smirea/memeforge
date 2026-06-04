@@ -30,7 +30,6 @@ final class KeyboardViewController: UIInputViewController {
 
 	private let modeControl = UISegmentedControl(items: ["Search", "Generate"])
 	private let queryLabel = UILabel()
-	private let statusLabel = UILabel()
 	private let accessBox = UIView()
 	private let accessTitleLabel = UILabel()
 	private let accessDetailLabel = UILabel()
@@ -72,11 +71,6 @@ final class KeyboardViewController: UIInputViewController {
 		queryLabel.textColor = .label
 		queryLabel.numberOfLines = 1
 		queryLabel.lineBreakMode = .byTruncatingHead
-
-		statusLabel.font = .systemFont(ofSize: 12, weight: .medium)
-		statusLabel.textColor = .secondaryLabel
-		statusLabel.numberOfLines = 1
-		statusLabel.isHidden = true
 
 		accessTitleLabel.font = .systemFont(ofSize: 14, weight: .bold)
 		accessTitleLabel.textColor = .label
@@ -137,7 +131,6 @@ final class KeyboardViewController: UIInputViewController {
 		])
 		root.addArrangedSubview(queryBox)
 
-		root.addArrangedSubview(statusLabel)
 		root.addArrangedSubview(accessBox)
 		root.addArrangedSubview(collectionView)
 
@@ -270,11 +263,7 @@ final class KeyboardViewController: UIInputViewController {
 
 	@objc private func openSetupApp() {
 		guard let url = URL(string: "memeforge://setup") else { return }
-		extensionContext?.open(url) { [weak self] success in
-			if !success {
-				self?.finish("Open Memeforge, then enable Full Access.")
-			}
-		}
+		extensionContext?.open(url)
 	}
 
 	@objc private func goTapped() {
@@ -297,11 +286,6 @@ final class KeyboardViewController: UIInputViewController {
 		SharedSettings.keyboardHasFullAccess = hasFullAccess
 		accessBox.isHidden = hasFullAccess
 		collectionView.isHidden = !hasFullAccess
-		if !hasFullAccess {
-			setStatus("Results need Full Access.")
-		} else if statusLabel.text == "Results need Full Access." || statusLabel.text == "Open Memeforge for setup steps." {
-			setStatus("")
-		}
 	}
 
 	private func setTypingKeysVisible(_ visible: Bool) {
@@ -313,7 +297,6 @@ final class KeyboardViewController: UIInputViewController {
 	private func queryDidChange() {
 		resetResults()
 		updatePrompt()
-		setStatus("")
 	}
 
 	private func resetResults() {
@@ -331,15 +314,12 @@ final class KeyboardViewController: UIInputViewController {
 		let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
 		guard hasFullAccess else {
 			updatePrompt()
-			setStatus("Open Memeforge for setup steps.")
 			return
 		}
 		guard !SharedSettings.giphyAPIKey.isEmpty else {
-			setStatus("Missing GIPHY key in local build settings.")
 			return
 		}
 		guard !trimmed.isEmpty else {
-			setStatus("Type a search term.")
 			return
 		}
 
@@ -351,7 +331,6 @@ final class KeyboardViewController: UIInputViewController {
 		results = []
 		collectionView.reloadData()
 		setTypingKeysVisible(false)
-		setStatus("Searching...")
 
 		fetchSearchResults(for: trimmed, offset: 0, replacingResults: true)
 	}
@@ -376,18 +355,17 @@ final class KeyboardViewController: UIInputViewController {
 
 		guard let url = components?.url else {
 			isLoadingSearchResults = false
-			setStatus("Invalid search URL.")
 			return
 		}
 
 		currentTask = URLSession.shared.dataTask(with: url) { [weak self] data, _, error in
 			guard let self else { return }
-			if let error {
-				self.finishSearch("Search failed: \(error.localizedDescription)", for: searchQuery)
+			if error != nil {
+				self.finishSearch(for: searchQuery)
 				return
 			}
 			guard let data else {
-				self.finishSearch("Search returned no data.", for: searchQuery)
+				self.finishSearch(for: searchQuery)
 				return
 			}
 
@@ -411,10 +389,9 @@ final class KeyboardViewController: UIInputViewController {
 					self.canLoadMoreSearchResults = hasMore && !items.isEmpty
 					self.isLoadingSearchResults = false
 					self.collectionView.reloadData()
-					self.setStatus(self.results.isEmpty ? "No static results." : "")
 				}
 			} catch {
-				self.finishSearch("Could not parse GIPHY response.", for: searchQuery)
+				self.finishSearch(for: searchQuery)
 			}
 		}
 		currentTask?.resume()
@@ -424,15 +401,12 @@ final class KeyboardViewController: UIInputViewController {
 		let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
 		guard hasFullAccess else {
 			updatePrompt()
-			setStatus("Open Memeforge for setup steps.")
 			return
 		}
 		guard !SharedSettings.geminiAPIKey.isEmpty else {
-			setStatus("Missing Gemini key in local build settings.")
 			return
 		}
 		guard !trimmed.isEmpty else {
-			setStatus("Describe the meme.")
 			return
 		}
 
@@ -443,7 +417,6 @@ final class KeyboardViewController: UIInputViewController {
 		isLoadingSearchResults = false
 		results = []
 		collectionView.reloadData()
-		setStatus("Generating...")
 
 		let url = URL(string: "https://generativelanguage.googleapis.com/v1/models/\(SharedSettings.geminiModel):generateContent")!
 		var request = URLRequest(url: url)
@@ -454,26 +427,26 @@ final class KeyboardViewController: UIInputViewController {
 
 		currentTask = URLSession.shared.dataTask(with: request) { [weak self] data, _, error in
 			guard let self else { return }
-			if let error {
-				self.finish("Generation failed: \(error.localizedDescription)")
+			if error != nil {
+				self.finish()
 				return
 			}
 			guard let data else {
-				self.finish("Generation returned no data.")
+				self.finish()
 				return
 			}
 
 			do {
 				let response = try JSONDecoder().decode(GeminiResponse.self, from: data)
-				if let message = response.error?.message {
-					self.finish(message)
+				if response.error?.message != nil {
+					self.finish()
 					return
 				}
 				guard let part = response.candidates?.flatMap(\.content.parts).first(where: { $0.inlineData != nil }),
 					let inlineData = part.inlineData,
 					let imageData = Data(base64Encoded: inlineData.data)
 				else {
-					self.finish("Gemini did not return an image.")
+					self.finish()
 					return
 				}
 
@@ -482,10 +455,9 @@ final class KeyboardViewController: UIInputViewController {
 				DispatchQueue.main.async {
 					self.results = [result]
 					self.collectionView.reloadData()
-					self.setStatus("Tap the generated image to copy it.")
 				}
 			} catch {
-				self.finish("Could not parse Gemini response.")
+				self.finish()
 			}
 		}
 		currentTask?.resume()
@@ -512,7 +484,6 @@ final class KeyboardViewController: UIInputViewController {
 	private func copy(_ result: MemeResult) {
 		guard hasFullAccess else {
 			updatePrompt()
-			setStatus("Open Memeforge for setup steps.")
 			return
 		}
 
@@ -522,15 +493,14 @@ final class KeyboardViewController: UIInputViewController {
 		}
 
 		guard let url = result.copyURL else { return }
-		setStatus("Copying...")
 		URLSession.shared.dataTask(with: url) { [weak self] data, response, error in
 			guard let self else { return }
-			if let error {
-				self.finish("Copy failed: \(error.localizedDescription)")
+			if error != nil {
+				self.finish()
 				return
 			}
 			guard let data else {
-				self.finish("Copy returned no data.")
+				self.finish()
 				return
 			}
 			let mimeType = (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Type")
@@ -547,28 +517,20 @@ final class KeyboardViewController: UIInputViewController {
 		} else {
 			UIPasteboard.general.setData(data, forPasteboardType: pasteboardType)
 		}
-		setStatus("Copied. Paste in the current app.")
 	}
 
-	private nonisolated func finish(_ message: String) {
+	private nonisolated func finish() {
 		Task { @MainActor [weak self] in
 			self?.isLoadingSearchResults = false
-			self?.setStatus(message)
 		}
 	}
 
-	private nonisolated func finishSearch(_ message: String, for searchQuery: String) {
+	private nonisolated func finishSearch(for searchQuery: String) {
 		Task { @MainActor [weak self] in
 			guard let self, self.searchQuery == searchQuery else { return }
 			self.isLoadingSearchResults = false
 			self.canLoadMoreSearchResults = false
-			self.setStatus(message)
 		}
-	}
-
-	@MainActor private func setStatus(_ message: String) {
-		statusLabel.text = message
-		statusLabel.isHidden = message.isEmpty
 	}
 }
 
