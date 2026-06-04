@@ -20,6 +20,13 @@ final class KeyboardViewController: UIInputViewController {
 	private var query = ""
 	private var results: [MemeResult] = []
 	private var currentTask: URLSessionDataTask?
+	private var keyRowStacks: [UIStackView] = []
+	private var searchQuery = ""
+	private var searchOffset = 0
+	private var canLoadMoreSearchResults = false
+	private var isLoadingSearchResults = false
+
+	private let searchPageSize = 30
 
 	private let modeControl = UISegmentedControl(items: ["Search", "Generate"])
 	private let queryLabel = UILabel()
@@ -31,9 +38,10 @@ final class KeyboardViewController: UIInputViewController {
 
 	init() {
 		let layout = UICollectionViewFlowLayout()
-		layout.scrollDirection = .horizontal
-		layout.minimumLineSpacing = 8
-		layout.minimumInteritemSpacing = 8
+		layout.scrollDirection = .vertical
+		layout.minimumLineSpacing = 6
+		layout.minimumInteritemSpacing = 6
+		layout.sectionInset = UIEdgeInsets(top: 0, left: 0, bottom: 4, right: 0)
 		collectionView = UICollectionView(frame: .zero, collectionViewLayout: layout)
 		super.init(nibName: nil, bundle: nil)
 	}
@@ -89,7 +97,11 @@ final class KeyboardViewController: UIInputViewController {
 		collectionView.delegate = self
 		collectionView.register(MemeCell.self, forCellWithReuseIdentifier: MemeCell.reuseIdentifier)
 		collectionView.showsHorizontalScrollIndicator = false
-		collectionView.heightAnchor.constraint(equalToConstant: 80).isActive = true
+		collectionView.showsVerticalScrollIndicator = true
+		collectionView.alwaysBounceVertical = true
+		collectionView.heightAnchor.constraint(greaterThanOrEqualToConstant: 96).isActive = true
+		collectionView.setContentHuggingPriority(.defaultLow, for: .vertical)
+		collectionView.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
 
 		let root = UIStackView()
 		root.axis = .vertical
@@ -110,11 +122,12 @@ final class KeyboardViewController: UIInputViewController {
 		topRow.alignment = .center
 		root.addArrangedSubview(topRow)
 
-		let queryBox = UIView()
+		let queryBox = UIControl()
 		queryBox.backgroundColor = .tertiarySystemBackground
 		queryBox.layer.cornerRadius = 8
 		queryBox.translatesAutoresizingMaskIntoConstraints = false
 		queryBox.heightAnchor.constraint(equalToConstant: 34).isActive = true
+		queryBox.addTarget(self, action: #selector(focusQuery), for: .touchUpInside)
 		queryBox.addSubview(queryLabel)
 		queryLabel.translatesAutoresizingMaskIntoConstraints = false
 		NSLayoutConstraint.activate([
@@ -155,17 +168,10 @@ final class KeyboardViewController: UIInputViewController {
 			accessRow.bottomAnchor.constraint(equalTo: accessBox.bottomAnchor, constant: -8),
 		])
 
-		let actionRow = UIStackView(arrangedSubviews: [
-			actionButton("Search", action: #selector(runSearch)),
-			actionButton("Generate", action: #selector(runGenerate)),
-		])
-		actionRow.axis = .horizontal
-		actionRow.spacing = 8
-		actionRow.distribution = .fillEqually
-		root.addArrangedSubview(actionRow)
-
 		for row in keyRows {
-			root.addArrangedSubview(keyboardRow(row))
+			let rowStack = keyboardRow(row)
+			keyRowStacks.append(rowStack)
+			root.addArrangedSubview(rowStack)
 		}
 	}
 
@@ -229,21 +235,9 @@ final class KeyboardViewController: UIInputViewController {
 		return button
 	}
 
-	private func actionButton(_ title: String, action: Selector) -> UIButton {
-		let button = UIButton(type: .system)
-		button.setTitle(title, for: .normal)
-		button.backgroundColor = .systemOrange
-		button.tintColor = .white
-		button.layer.cornerRadius = 8
-		button.titleLabel?.font = .systemFont(ofSize: 16, weight: .bold)
-		button.heightAnchor.constraint(equalToConstant: 30).isActive = true
-		button.addTarget(self, action: action, for: .touchUpInside)
-		return button
-	}
-
 	private func append(_ text: String) {
 		query.append(text)
-		updatePrompt()
+		queryDidChange()
 	}
 
 	@objc private func spaceTapped() {
@@ -254,18 +248,19 @@ final class KeyboardViewController: UIInputViewController {
 	@objc private func deleteTapped() {
 		guard !query.isEmpty else { return }
 		query.removeLast()
-		updatePrompt()
+		queryDidChange()
 	}
 
 	@objc private func clearQuery() {
 		query = ""
-		results = []
-		collectionView.reloadData()
-		updatePrompt()
+		queryDidChange()
+		setTypingKeysVisible(true)
 	}
 
 	@objc private func modeChanged() {
 		mode = Mode(rawValue: modeControl.selectedSegmentIndex) ?? .search
+		resetResults()
+		setTypingKeysVisible(true)
 		updatePrompt()
 	}
 
@@ -291,21 +286,14 @@ final class KeyboardViewController: UIInputViewController {
 		}
 	}
 
-	@objc private func runSearch() {
-		modeControl.selectedSegmentIndex = Mode.search.rawValue
-		modeChanged()
-		search()
-	}
-
-	@objc private func runGenerate() {
-		modeControl.selectedSegmentIndex = Mode.generate.rawValue
-		modeChanged()
-		generate()
+	@objc private func focusQuery() {
+		setTypingKeysVisible(true)
 	}
 
 	private func updatePrompt() {
 		let placeholder = mode == .search ? "type a meme search" : "describe a static meme"
 		queryLabel.text = query.isEmpty ? placeholder : query
+		queryLabel.textColor = query.isEmpty ? .secondaryLabel : .label
 		SharedSettings.keyboardHasFullAccess = hasFullAccess
 		accessBox.isHidden = hasFullAccess
 		collectionView.isHidden = !hasFullAccess
@@ -314,6 +302,29 @@ final class KeyboardViewController: UIInputViewController {
 		} else if statusLabel.text == "Results need Full Access." || statusLabel.text == "Open Memeforge for setup steps." {
 			setStatus("")
 		}
+	}
+
+	private func setTypingKeysVisible(_ visible: Bool) {
+		keyRowStacks.forEach { $0.isHidden = !visible }
+		collectionView.collectionViewLayout.invalidateLayout()
+		view.setNeedsLayout()
+	}
+
+	private func queryDidChange() {
+		resetResults()
+		updatePrompt()
+		setStatus("")
+	}
+
+	private func resetResults() {
+		currentTask?.cancel()
+		currentTask = nil
+		searchQuery = ""
+		searchOffset = 0
+		canLoadMoreSearchResults = false
+		isLoadingSearchResults = false
+		results = []
+		collectionView.reloadData()
 	}
 
 	private func search() {
@@ -333,18 +344,38 @@ final class KeyboardViewController: UIInputViewController {
 		}
 
 		currentTask?.cancel()
+		searchQuery = trimmed
+		searchOffset = 0
+		canLoadMoreSearchResults = true
+		isLoadingSearchResults = false
+		results = []
+		collectionView.reloadData()
+		setTypingKeysVisible(false)
 		setStatus("Searching...")
+
+		fetchSearchResults(for: trimmed, offset: 0, replacingResults: true)
+	}
+
+	private func loadMoreSearchResultsIfNeeded() {
+		guard mode == .search, hasFullAccess, canLoadMoreSearchResults, !isLoadingSearchResults, !searchQuery.isEmpty else { return }
+		fetchSearchResults(for: searchQuery, offset: searchOffset, replacingResults: false)
+	}
+
+	private func fetchSearchResults(for searchQuery: String, offset: Int, replacingResults: Bool) {
+		isLoadingSearchResults = true
 
 		var components = URLComponents(string: "https://api.giphy.com/v1/gifs/search")
 		components?.queryItems = [
 			URLQueryItem(name: "api_key", value: SharedSettings.giphyAPIKey),
-			URLQueryItem(name: "q", value: trimmed),
-			URLQueryItem(name: "limit", value: "24"),
+			URLQueryItem(name: "q", value: searchQuery),
+			URLQueryItem(name: "limit", value: "\(searchPageSize)"),
+			URLQueryItem(name: "offset", value: "\(offset)"),
 			URLQueryItem(name: "rating", value: "pg-13"),
 			URLQueryItem(name: "lang", value: "en"),
 		]
 
 		guard let url = components?.url else {
+			isLoadingSearchResults = false
 			setStatus("Invalid search URL.")
 			return
 		}
@@ -352,11 +383,11 @@ final class KeyboardViewController: UIInputViewController {
 		currentTask = URLSession.shared.dataTask(with: url) { [weak self] data, _, error in
 			guard let self else { return }
 			if let error {
-				self.finish("Search failed: \(error.localizedDescription)")
+				self.finishSearch("Search failed: \(error.localizedDescription)", for: searchQuery)
 				return
 			}
 			guard let data else {
-				self.finish("Search returned no data.")
+				self.finishSearch("Search returned no data.", for: searchQuery)
 				return
 			}
 
@@ -369,13 +400,21 @@ final class KeyboardViewController: UIInputViewController {
 					let copy = item.images.originalStill?.url ?? item.images.fixedWidthStill?.url ?? preview
 					return MemeResult(title: item.title, previewURL: preview, copyURL: copy, imageData: nil, pasteboardType: UTType.png.identifier)
 				}
+				let loadedCount = response.pagination?.count ?? items.count
+				let nextOffset = offset + loadedCount
+				let totalCount = response.pagination?.totalCount
+				let hasMore = totalCount.map { nextOffset < $0 } ?? (items.count == self.searchPageSize)
 				DispatchQueue.main.async {
-					self.results = items
+					guard self.searchQuery == searchQuery else { return }
+					self.results = replacingResults ? items : self.results + items
+					self.searchOffset = nextOffset
+					self.canLoadMoreSearchResults = hasMore && !items.isEmpty
+					self.isLoadingSearchResults = false
 					self.collectionView.reloadData()
-					self.setStatus(items.isEmpty ? "No static results." : "Tap a result to copy it.")
+					self.setStatus(self.results.isEmpty ? "No static results." : "")
 				}
 			} catch {
-				self.finish("Could not parse GIPHY response.")
+				self.finishSearch("Could not parse GIPHY response.", for: searchQuery)
 			}
 		}
 		currentTask?.resume()
@@ -398,6 +437,12 @@ final class KeyboardViewController: UIInputViewController {
 		}
 
 		currentTask?.cancel()
+		searchQuery = ""
+		searchOffset = 0
+		canLoadMoreSearchResults = false
+		isLoadingSearchResults = false
+		results = []
+		collectionView.reloadData()
 		setStatus("Generating...")
 
 		let url = URL(string: "https://generativelanguage.googleapis.com/v1/models/\(SharedSettings.geminiModel):generateContent")!
@@ -507,7 +552,17 @@ final class KeyboardViewController: UIInputViewController {
 
 	private nonisolated func finish(_ message: String) {
 		Task { @MainActor [weak self] in
+			self?.isLoadingSearchResults = false
 			self?.setStatus(message)
+		}
+	}
+
+	private nonisolated func finishSearch(_ message: String, for searchQuery: String) {
+		Task { @MainActor [weak self] in
+			guard let self, self.searchQuery == searchQuery else { return }
+			self.isLoadingSearchResults = false
+			self.canLoadMoreSearchResults = false
+			self.setStatus(message)
 		}
 	}
 
@@ -533,7 +588,19 @@ extension KeyboardViewController: UICollectionViewDataSource, UICollectionViewDe
 	}
 
 	func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, sizeForItemAt indexPath: IndexPath) -> CGSize {
-		CGSize(width: 76, height: 76)
+		let layout = collectionViewLayout as? UICollectionViewFlowLayout
+		let inset = layout?.sectionInset ?? .zero
+		let spacing = layout?.minimumInteritemSpacing ?? 0
+		let availableWidth = collectionView.bounds.width - inset.left - inset.right - spacing * 2
+		let side = floor(availableWidth / 3)
+		return CGSize(width: side, height: side)
+	}
+
+	func scrollViewDidScroll(_ scrollView: UIScrollView) {
+		let remaining = scrollView.contentSize.height - scrollView.bounds.height - scrollView.contentOffset.y
+		if remaining < 240 {
+			loadMoreSearchResultsIfNeeded()
+		}
 	}
 }
 
@@ -588,6 +655,17 @@ private final class MemeCell: UICollectionViewCell {
 
 private struct GiphyResponse: Decodable {
 	let data: [GiphyItem]
+	let pagination: GiphyPagination?
+}
+
+private struct GiphyPagination: Decodable {
+	let totalCount: Int
+	let count: Int
+
+	enum CodingKeys: String, CodingKey {
+		case totalCount = "total_count"
+		case count
+	}
 }
 
 private struct GiphyItem: Decodable {
