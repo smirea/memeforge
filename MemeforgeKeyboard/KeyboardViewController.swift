@@ -9,6 +9,18 @@ final class KeyboardViewController: UIInputViewController {
 		case generate
 	}
 
+	private enum KeyboardLayoutMode {
+		case alphabet
+		case numeric
+		case symbols
+	}
+
+	private enum ShiftState {
+		case lowercase
+		case uppercase
+		case capsLock
+	}
+
 	fileprivate struct MemeResult: Hashable {
 		let id = UUID()
 		let title: String
@@ -27,8 +39,13 @@ final class KeyboardViewController: UIInputViewController {
 	private var letterKeyButtons: [UIButton] = []
 	private var systemKeyButtons: [UIButton] = []
 	private var returnKeyButton: UIButton?
+	private var alphabetKeyButtons: [(button: UIButton, letter: String)] = []
+	private var shiftKeyButton: UIButton?
 	private var typingControlsVisible = true
 	private var queryInputFocused = true
+	private var keyboardLayoutMode = KeyboardLayoutMode.alphabet
+	private var shiftState = ShiftState.lowercase
+	private var lastShiftTapDate = Date.distantPast
 	private var searchQuery = ""
 	private var searchOffset = 0
 	private var canLoadMoreSearchResults = false
@@ -208,20 +225,49 @@ final class KeyboardViewController: UIInputViewController {
 			accessRow.bottomAnchor.constraint(equalTo: accessBox.bottomAnchor, constant: -8),
 		])
 
-		buildKeyboardRows(in: rootStack)
+		rebuildKeyboardRows()
 	}
 
-	private func buildKeyboardRows(in root: UIStackView) {
-		let rows = [
-			letterRow(["q", "w", "e", "r", "t", "y", "u", "i", "o", "p"]),
-			letterRow(["a", "s", "d", "f", "g", "h", "j", "k", "l"], sideSpacerMultiplier: 0.5),
-			shiftRow(),
-			bottomRow(),
-		]
+	private func rebuildKeyboardRows() {
+		keyRowStacks.forEach { $0.removeFromSuperview() }
+		keyRowStacks.removeAll()
+		letterKeyButtons.removeAll()
+		systemKeyButtons.removeAll()
+		returnKeyButton = nil
+		alphabetKeyButtons.removeAll()
+		shiftKeyButton = nil
+
+		let rows: [UIStackView]
+		switch keyboardLayoutMode {
+		case .alphabet:
+			rows = [
+				letterRow(["q", "w", "e", "r", "t", "y", "u", "i", "o", "p"]),
+				letterRow(["a", "s", "d", "f", "g", "h", "j", "k", "l"], sideSpacerMultiplier: 0.5),
+				shiftRow(),
+				bottomRow(),
+			]
+		case .numeric:
+			rows = [
+				letterRow(["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"]),
+				letterRow(["-", "/", ":", ";", "(", ")", "$", "&", "@", "\""]),
+				numericSymbolRow(toggleKey: "symbols"),
+				numericBottomRow(toggleKey: "letters"),
+			]
+		case .symbols:
+			rows = [
+				letterRow(["[", "]", "{", "}", "#", "%", "^", "*", "+", "="]),
+				letterRow(["_", "\\", "|", "~", "<", ">", "€", "£", "¥", "•"]),
+				numericSymbolRow(toggleKey: "numbers"),
+				numericBottomRow(toggleKey: "letters"),
+			]
+		}
 		for row in rows {
 			keyRowStacks.append(row)
-			root.addArrangedSubview(row)
+			rootStack.addArrangedSubview(row)
 		}
+		applyKeyboardTheme()
+		updateAlphabetKeyTitles()
+		updateContainerSizing()
 	}
 
 	private func letterRow(_ letters: [String], sideSpacerMultiplier: CGFloat = 0) -> UIStackView {
@@ -289,6 +335,47 @@ final class KeyboardViewController: UIInputViewController {
 		return row
 	}
 
+	private func numericSymbolRow(toggleKey: String) -> UIStackView {
+		let row = UIStackView()
+		row.axis = .horizontal
+		row.spacing = keySpacing
+		row.distribution = .fill
+
+		let toggle = keyButton(toggleKey)
+		let characters = [".", ",", "?", "!", "'"].map { keyButton($0) }
+		let delete = keyButton("delete")
+		let leadingSpacer = UIView()
+		let trailingSpacer = UIView()
+		([toggle, leadingSpacer] + characters + [trailingSpacer, delete]).forEach(row.addArrangedSubview)
+		equalizeWidths(characters)
+		if let first = characters.first {
+			NSLayoutConstraint.activate([
+				toggle.widthAnchor.constraint(equalTo: first.widthAnchor, multiplier: 1.35),
+				delete.widthAnchor.constraint(equalTo: toggle.widthAnchor),
+				leadingSpacer.widthAnchor.constraint(equalTo: first.widthAnchor, multiplier: 0.25),
+				trailingSpacer.widthAnchor.constraint(equalTo: leadingSpacer.widthAnchor),
+			])
+		}
+		return row
+	}
+
+	private func numericBottomRow(toggleKey: String) -> UIStackView {
+		let row = UIStackView()
+		row.axis = .horizontal
+		row.spacing = keySpacing
+		row.distribution = .fill
+
+		let letters = keyButton(toggleKey)
+		let space = keyButton("space")
+		let submit = keyButton("return")
+		[letters, space, submit].forEach(row.addArrangedSubview)
+		NSLayoutConstraint.activate([
+			submit.widthAnchor.constraint(equalTo: letters.widthAnchor),
+			space.widthAnchor.constraint(equalTo: letters.widthAnchor, multiplier: 2.05),
+		])
+		return row
+	}
+
 	private func equalizeWidths(_ buttons: [UIButton]) {
 		guard let first = buttons.first else { return }
 		for button in buttons.dropFirst() {
@@ -312,7 +399,8 @@ final class KeyboardViewController: UIInputViewController {
 		let role: KeyRole
 		switch key {
 		case "space":
-			button.setTitle("", for: .normal)
+			button.setTitle(keyboardLayoutMode == .alphabet ? "" : "space", for: .normal)
+			button.titleLabel?.font = .systemFont(ofSize: 21, weight: .regular)
 			button.addTarget(self, action: #selector(spaceTapped), for: .touchUpInside)
 			role = .letter
 		case "delete":
@@ -320,19 +408,41 @@ final class KeyboardViewController: UIInputViewController {
 			button.addTarget(self, action: #selector(deleteTapped), for: .touchUpInside)
 			role = .system
 		case "shift":
-			button.setImage(UIImage(systemName: "shift.fill"), for: .normal)
+			button.addTarget(self, action: #selector(shiftTapped), for: .touchUpInside)
+			shiftKeyButton = button
 			role = .system
 		case "numbers":
 			button.setTitle("123", for: .normal)
 			button.titleLabel?.font = .systemFont(ofSize: 21, weight: .regular)
+			button.addTarget(self, action: #selector(showNumericKeyboard), for: .touchUpInside)
+			role = .system
+		case "symbols":
+			button.setTitle("#+=", for: .normal)
+			button.titleLabel?.font = .systemFont(ofSize: 20, weight: .regular)
+			button.addTarget(self, action: #selector(showSymbolKeyboard), for: .touchUpInside)
+			role = .system
+		case "letters":
+			button.setTitle("ABC", for: .normal)
+			button.titleLabel?.font = .systemFont(ofSize: 21, weight: .regular)
+			button.addTarget(self, action: #selector(showAlphabetKeyboard), for: .touchUpInside)
 			role = .system
 		case "submit":
 			button.setImage(UIImage(systemName: "checkmark"), for: .normal)
 			button.addTarget(self, action: #selector(goTapped), for: .touchUpInside)
 			role = .submit
+		case "return":
+			button.setTitle("return", for: .normal)
+			button.titleLabel?.font = .systemFont(ofSize: 21, weight: .regular)
+			button.addTarget(self, action: #selector(goTapped), for: .touchUpInside)
+			role = .system
 		default:
-			button.setTitle(key.uppercased(), for: .normal)
-			button.addAction(UIAction { [weak self] _ in self?.append(key) }, for: .touchUpInside)
+			if key.count == 1, let character = key.first, character.isLetter {
+				alphabetKeyButtons.append((button, key.lowercased()))
+				button.addAction(UIAction { [weak self] _ in self?.appendLetter(key) }, for: .touchUpInside)
+			} else {
+				button.setTitle(key, for: .normal)
+				button.addAction(UIAction { [weak self] _ in self?.append(key) }, for: .touchUpInside)
+			}
 			role = .letter
 		}
 
@@ -349,6 +459,34 @@ final class KeyboardViewController: UIInputViewController {
 		case .submit:
 			returnKeyButton = button
 		}
+	}
+
+	private func updateAlphabetKeyTitles() {
+		let usesUppercase = shiftState != .lowercase
+		for key in alphabetKeyButtons {
+			key.button.setTitle(usesUppercase ? key.letter.uppercased() : key.letter, for: .normal)
+		}
+
+		guard let shiftKeyButton else { return }
+		let imageName: String
+		switch shiftState {
+		case .lowercase:
+			imageName = "shift"
+			shiftKeyButton.accessibilityLabel = "shift"
+		case .uppercase:
+			imageName = "shift.fill"
+			shiftKeyButton.accessibilityLabel = "shift on"
+		case .capsLock:
+			imageName = "capslock.fill"
+			shiftKeyButton.accessibilityLabel = "caps lock"
+		}
+		shiftKeyButton.setImage(UIImage(systemName: imageName), for: .normal)
+
+		let isDark = traitCollection.userInterfaceStyle == .dark
+		let active = shiftState != .lowercase
+		let backgroundColor = active ? (isDark ? UIColor(white: 0.36, alpha: 1) : UIColor.white) : (isDark ? UIColor(white: 0.22, alpha: 1) : UIColor.systemGray3)
+		let tintColor = isDark ? UIColor.white : UIColor.label
+		styleKey(shiftKeyButton, backgroundColor: backgroundColor, tintColor: tintColor, shadow: !isDark && active)
 	}
 
 	private func applyKeyboardTheme() {
@@ -375,6 +513,7 @@ final class KeyboardViewController: UIInputViewController {
 		closeButton.tintColor = textColor
 		loadingIndicator.color = isDark ? .white : .secondaryLabel
 		applyQueryInputFocus(animated: false)
+		updateAlphabetKeyTitles()
 	}
 
 	private func styleKey(_ button: UIButton, backgroundColor: UIColor, tintColor: UIColor, shadow: Bool) {
@@ -404,9 +543,34 @@ final class KeyboardViewController: UIInputViewController {
 		queryDidChange()
 	}
 
+	private func appendLetter(_ letter: String) {
+		let shouldUppercase = shiftState != .lowercase
+		append(shouldUppercase ? letter.uppercased() : letter.lowercased())
+		if shiftState == .uppercase {
+			shiftState = .lowercase
+			updateAlphabetKeyTitles()
+		}
+	}
+
 	@objc private func spaceTapped() {
 		guard !query.hasSuffix(" ") else { return }
 		append(" ")
+	}
+
+	@objc private func shiftTapped() {
+		let now = Date()
+		if shiftState == .uppercase, now.timeIntervalSince(lastShiftTapDate) < 0.45 {
+			shiftState = .capsLock
+		} else {
+			switch shiftState {
+			case .lowercase:
+				shiftState = .uppercase
+			case .uppercase, .capsLock:
+				shiftState = .lowercase
+			}
+		}
+		lastShiftTapDate = now
+		updateAlphabetKeyTitles()
 	}
 
 	@objc private func deleteTapped() {
@@ -426,6 +590,22 @@ final class KeyboardViewController: UIInputViewController {
 		resetResults()
 		setTypingControlsVisible(true)
 		updatePrompt()
+	}
+
+	@objc private func showAlphabetKeyboard() {
+		keyboardLayoutMode = .alphabet
+		shiftState = .lowercase
+		rebuildKeyboardRows()
+	}
+
+	@objc private func showNumericKeyboard() {
+		keyboardLayoutMode = .numeric
+		rebuildKeyboardRows()
+	}
+
+	@objc private func showSymbolKeyboard() {
+		keyboardLayoutMode = .symbols
+		rebuildKeyboardRows()
 	}
 
 	@objc private func closeKeyboard() {
