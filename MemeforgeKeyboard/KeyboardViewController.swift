@@ -28,6 +28,7 @@ final class KeyboardViewController: UIInputViewController {
 	private var systemKeyButtons: [UIButton] = []
 	private var returnKeyButton: UIButton?
 	private var typingControlsVisible = true
+	private var queryInputFocused = true
 	private var searchQuery = ""
 	private var searchOffset = 0
 	private var canLoadMoreSearchResults = false
@@ -157,6 +158,7 @@ final class KeyboardViewController: UIInputViewController {
 
 		queryBox.backgroundColor = .tertiarySystemBackground
 		queryBox.layer.cornerRadius = 8
+		queryBox.layer.borderWidth = 2
 		queryBox.translatesAutoresizingMaskIntoConstraints = false
 		queryBox.heightAnchor.constraint(equalToConstant: queryBoxHeight).isActive = true
 		queryBox.addTarget(self, action: #selector(focusQuery), for: .touchUpInside)
@@ -372,6 +374,7 @@ final class KeyboardViewController: UIInputViewController {
 		closeButton.backgroundColor = isDark ? systemColor : .tertiarySystemBackground
 		closeButton.tintColor = textColor
 		loadingIndicator.color = isDark ? .white : .secondaryLabel
+		applyQueryInputFocus(animated: false)
 	}
 
 	private func styleKey(_ button: UIButton, backgroundColor: UIColor, tintColor: UIColor, shadow: Bool) {
@@ -458,12 +461,44 @@ final class KeyboardViewController: UIInputViewController {
 
 	private func setTypingControlsVisible(_ visible: Bool) {
 		typingControlsVisible = visible
+		setQueryInputFocused(visible, animated: true)
 		queryBox.isHidden = !visible
 		keyboardRestoreButton.isHidden = visible
 		keyRowStacks.forEach { $0.isHidden = !visible }
 		collectionView.collectionViewLayout.invalidateLayout()
 		updateContainerSizing()
 		view.setNeedsLayout()
+	}
+
+	private func setQueryInputFocused(_ focused: Bool, animated: Bool) {
+		guard queryInputFocused != focused else { return }
+		queryInputFocused = focused
+		applyQueryInputFocus(animated: animated)
+	}
+
+	private func applyQueryInputFocus(animated: Bool) {
+		let borderColor = queryInputFocused ? UIColor.systemBlue.cgColor : UIColor.clear.cgColor
+		let borderWidth: CGFloat = queryInputFocused ? 2 : 0
+
+		if animated {
+			let colorAnimation = CABasicAnimation(keyPath: "borderColor")
+			colorAnimation.fromValue = queryBox.layer.presentation()?.borderColor ?? queryBox.layer.borderColor
+			colorAnimation.toValue = borderColor
+			colorAnimation.duration = 0.22
+			colorAnimation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+
+			let widthAnimation = CABasicAnimation(keyPath: "borderWidth")
+			widthAnimation.fromValue = queryBox.layer.presentation()?.borderWidth ?? queryBox.layer.borderWidth
+			widthAnimation.toValue = borderWidth
+			widthAnimation.duration = 0.22
+			widthAnimation.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+
+			queryBox.layer.add(colorAnimation, forKey: "queryFocusBorderColor")
+			queryBox.layer.add(widthAnimation, forKey: "queryFocusBorderWidth")
+		}
+
+		queryBox.layer.borderColor = borderColor
+		queryBox.layer.borderWidth = borderWidth
 	}
 
 	private func updateContainerSizing() {
