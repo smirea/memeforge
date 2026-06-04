@@ -50,6 +50,7 @@
 		B10000000000000000000007 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B10000000000000000000008 /* Memeforge.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Memeforge.entitlements; sourceTree = "<group>"; };
 		B10000000000000000000009 /* MemeforgeKeyboard.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = MemeforgeKeyboard.entitlements; sourceTree = "<group>"; };
+		B10000000000000000000010 /* Secrets.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Secrets.xcconfig; sourceTree = "<group>"; };
 		C10000000000000000000001 /* Memeforge.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Memeforge.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C10000000000000000000002 /* MemeforgeKeyboard.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = MemeforgeKeyboard.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -78,6 +79,7 @@
 				I10000000000000000000002 /* Memeforge */,
 				I10000000000000000000003 /* MemeforgeKeyboard */,
 				I10000000000000000000004 /* Shared */,
+				I10000000000000000000006 /* Config */,
 				I10000000000000000000005 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -119,6 +121,14 @@
 				C10000000000000000000002 /* MemeforgeKeyboard.appex */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		I10000000000000000000006 /* Config */ = {
+			isa = PBXGroup;
+			children = (
+				B10000000000000000000010 /* Secrets.xcconfig */,
+			);
+			path = Config;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -240,6 +250,7 @@
 /* Begin XCBuildConfiguration section */
 		N10000000000000000000001 /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = B10000000000000000000010 /* Secrets.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_ANALYZER_NONNULL = YES;
@@ -302,6 +313,7 @@
 		};
 		N10000000000000000000002 /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = B10000000000000000000010 /* Secrets.xcconfig */;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_ANALYZER_NONNULL = YES;
@@ -357,6 +369,7 @@
 		};
 		N10000000000000000000003 /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = B10000000000000000000010 /* Secrets.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -381,6 +394,7 @@
 		};
 		N10000000000000000000004 /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = B10000000000000000000010 /* Secrets.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -405,6 +419,7 @@
 		};
 		N10000000000000000000005 /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = B10000000000000000000010 /* Secrets.xcconfig */;
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = MemeforgeKeyboard/MemeforgeKeyboard.entitlements;
@@ -429,6 +444,7 @@
 		};
 		N10000000000000000000006 /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = B10000000000000000000010 /* Secrets.xcconfig */;
 			buildSettings = {
 				APPLICATION_EXTENSION_API_ONLY = YES;
 				CODE_SIGN_ENTITLEMENTS = MemeforgeKeyboard/MemeforgeKeyboard.entitlements;

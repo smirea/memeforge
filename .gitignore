@@ -3,5 +3,6 @@
 DerivedData
 .env
 .env.local
+Config/LocalSecrets.xcconfig
 
 .DS_Store
