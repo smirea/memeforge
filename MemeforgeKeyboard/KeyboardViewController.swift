@@ -66,19 +66,19 @@ final class KeyboardViewController: UIInputViewController {
 		collectionView.delegate = self
 		collectionView.register(MemeCell.self, forCellWithReuseIdentifier: MemeCell.reuseIdentifier)
 		collectionView.showsHorizontalScrollIndicator = false
-		collectionView.heightAnchor.constraint(equalToConstant: 116).isActive = true
+		collectionView.heightAnchor.constraint(equalToConstant: 80).isActive = true
 
 		let root = UIStackView()
 		root.axis = .vertical
-		root.spacing = 8
+		root.spacing = 5
 		root.translatesAutoresizingMaskIntoConstraints = false
 		view.addSubview(root)
 
 		NSLayoutConstraint.activate([
 			root.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 8),
 			root.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -8),
-			root.topAnchor.constraint(equalTo: view.topAnchor, constant: 8),
-			root.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -6),
+			root.topAnchor.constraint(equalTo: view.topAnchor, constant: 6),
+			root.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -4),
 		])
 
 		let topRow = UIStackView(arrangedSubviews: [smallButton("globe", action: #selector(nextKeyboard)), modeControl, smallButton("xmark", action: #selector(clearQuery))])
@@ -91,7 +91,7 @@ final class KeyboardViewController: UIInputViewController {
 		queryBox.backgroundColor = .tertiarySystemBackground
 		queryBox.layer.cornerRadius = 8
 		queryBox.translatesAutoresizingMaskIntoConstraints = false
-		queryBox.heightAnchor.constraint(equalToConstant: 40).isActive = true
+		queryBox.heightAnchor.constraint(equalToConstant: 34).isActive = true
 		queryBox.addSubview(queryLabel)
 		queryLabel.translatesAutoresizingMaskIntoConstraints = false
 		NSLayoutConstraint.activate([
@@ -145,7 +145,7 @@ final class KeyboardViewController: UIInputViewController {
 		button.tintColor = .label
 		button.layer.cornerRadius = 7
 		button.titleLabel?.font = .systemFont(ofSize: 17, weight: .semibold)
-		button.heightAnchor.constraint(equalToConstant: 34).isActive = true
+		button.heightAnchor.constraint(equalToConstant: 28).isActive = true
 		button.accessibilityIdentifier = "key-\(key)"
 
 		switch key {
@@ -172,8 +172,8 @@ final class KeyboardViewController: UIInputViewController {
 		button.backgroundColor = .tertiarySystemBackground
 		button.tintColor = .label
 		button.layer.cornerRadius = 8
-		button.widthAnchor.constraint(equalToConstant: 42).isActive = true
-		button.heightAnchor.constraint(equalToConstant: 32).isActive = true
+		button.widthAnchor.constraint(equalToConstant: 38).isActive = true
+		button.heightAnchor.constraint(equalToConstant: 30).isActive = true
 		button.addTarget(self, action: action, for: .touchUpInside)
 		return button
 	}
@@ -185,7 +185,7 @@ final class KeyboardViewController: UIInputViewController {
 		button.tintColor = .white
 		button.layer.cornerRadius = 8
 		button.titleLabel?.font = .systemFont(ofSize: 16, weight: .bold)
-		button.heightAnchor.constraint(equalToConstant: 36).isActive = true
+		button.heightAnchor.constraint(equalToConstant: 30).isActive = true
 		button.addTarget(self, action: action, for: .touchUpInside)
 		return button
 	}
@@ -278,7 +278,6 @@ final class KeyboardViewController: UIInputViewController {
 			URLQueryItem(name: "limit", value: "24"),
 			URLQueryItem(name: "rating", value: "pg-13"),
 			URLQueryItem(name: "lang", value: "en"),
-			URLQueryItem(name: "bundle", value: "messaging_non_clips"),
 		]
 
 		guard let url = components?.url else {
@@ -396,15 +395,6 @@ final class KeyboardViewController: UIInputViewController {
 					],
 				],
 			],
-			"generationConfig": [
-				"responseModalities": ["TEXT", "IMAGE"],
-				"responseFormat": [
-					"image": [
-						"aspectRatio": "1:1",
-						"imageSize": "1K",
-					],
-				],
-			],
 		]
 		return try? JSONSerialization.data(withJSONObject: body)
 	}
@@ -472,7 +462,7 @@ extension KeyboardViewController: UICollectionViewDataSource, UICollectionViewDe
 	}
 
 	func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, sizeForItemAt indexPath: IndexPath) -> CGSize {
-		CGSize(width: 104, height: 104)
+		CGSize(width: 76, height: 76)
 	}
 }
 

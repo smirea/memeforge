@@ -3,6 +3,7 @@ import SwiftUI
 struct ContentView: View {
 	@State private var giphyAPIKey = SharedSettings.giphyAPIKey
 	@State private var geminiAPIKey = SharedSettings.geminiAPIKey
+	@State private var keyboardTest = ""
 	@State private var saved = false
 
 	var body: some View {
@@ -25,6 +26,9 @@ struct ContentView: View {
 				Section("Keyboard") {
 					Label("Enable Memeforge in Settings > General > Keyboard > Keyboards.", systemImage: "keyboard")
 					Label("Turn on Allow Full Access so search and generation can use the network.", systemImage: "network")
+					TextField("Test keyboard input", text: $keyboardTest)
+						.textInputAutocapitalization(.never)
+						.autocorrectionDisabled()
 					Button("Open App Settings") {
 						guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
 						UIApplication.shared.open(url)
