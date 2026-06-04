@@ -59,7 +59,7 @@ final class KeyboardViewController: UIInputViewController {
 	private let loadingIndicator = UIActivityIndicatorView(style: .large)
 	private let rootStack = UIStackView()
 	private lazy var keyboardRestoreButton = smallButton("keyboard", action: #selector(focusQuery))
-	private lazy var closeButton = smallButton("xmark", action: #selector(clearQuery))
+	private lazy var closeButton = smallButton("xmark", action: #selector(closeKeyboard))
 	private var heightConstraint: NSLayoutConstraint?
 	private var collectionHeightConstraint: NSLayoutConstraint?
 
@@ -149,7 +149,7 @@ final class KeyboardViewController: UIInputViewController {
 		])
 
 		keyboardRestoreButton.isHidden = true
-		let topRow = UIStackView(arrangedSubviews: [smallButton("globe", action: #selector(nextKeyboard)), modeControl, keyboardRestoreButton, closeButton])
+		let topRow = UIStackView(arrangedSubviews: [modeControl, keyboardRestoreButton, closeButton])
 		topRow.axis = .horizontal
 		topRow.spacing = 8
 		topRow.alignment = .center
@@ -428,7 +428,7 @@ final class KeyboardViewController: UIInputViewController {
 		updatePrompt()
 	}
 
-	@objc private func nextKeyboard() {
+	@objc private func closeKeyboard() {
 		advanceToNextInputMode()
 	}
 
@@ -844,6 +844,7 @@ final class KeyboardViewController: UIInputViewController {
 		if pasteboardType == UTType.gif.identifier || UIImage.isAnimatedGIF(data: data) {
 			UIPasteboard.general.setData(data, forPasteboardType: UTType.gif.identifier)
 			SharedSettings.updateCopiedMemePreview(data)
+			closeKeyboard()
 			return
 		}
 
@@ -854,6 +855,7 @@ final class KeyboardViewController: UIInputViewController {
 			UIPasteboard.general.setData(data, forPasteboardType: pasteboardType)
 			SharedSettings.updateCopiedMemePreview(data)
 		}
+		closeKeyboard()
 	}
 
 	private nonisolated func finish() {
