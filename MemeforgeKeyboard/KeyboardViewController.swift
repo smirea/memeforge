@@ -52,6 +52,7 @@ final class KeyboardViewController: UIInputViewController {
 	private var isLoadingSearchResults = false
 	private var generationID = UUID()
 	private var pendingGenerationCount = 0
+	private let keyFeedback = UIImpactFeedbackGenerator(style: .light)
 
 	private let searchPageSize = 30
 	private let keyHeight: CGFloat = 46
@@ -77,6 +78,7 @@ final class KeyboardViewController: UIInputViewController {
 	private let modeControl = UISegmentedControl(items: ["Search", "Generate"])
 	private let queryLabel = UILabel()
 	private let queryBox = UIControl()
+	private let queryCaret = UIView()
 	private let queryClearButton = UIButton(type: .system)
 	private let accessBox = UIView()
 	private let accessTitleLabel = UILabel()
@@ -89,6 +91,9 @@ final class KeyboardViewController: UIInputViewController {
 	private var heightConstraint: NSLayoutConstraint?
 	private var collectionHeightConstraint: NSLayoutConstraint?
 	private var queryBoxHeightConstraint: NSLayoutConstraint?
+	private var queryCaretLeadingConstraint: NSLayoutConstraint?
+	private var queryCaretTopConstraint: NSLayoutConstraint?
+	private var queryCaretHeightConstraint: NSLayoutConstraint?
 
 	init() {
 		let layout = UICollectionViewFlowLayout()
@@ -111,6 +116,7 @@ final class KeyboardViewController: UIInputViewController {
 		heightConstraint?.isActive = true
 		buildInterface()
 		applyKeyboardTheme()
+		keyFeedback.prepare()
 		registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (self: Self, _) in
 			self.applyKeyboardTheme()
 		}
@@ -125,6 +131,7 @@ final class KeyboardViewController: UIInputViewController {
 	override func viewDidLayoutSubviews() {
 		super.viewDidLayoutSubviews()
 		updateQueryBoxHeight()
+		updateCaretPosition()
 		updateContainerSizing()
 	}
 
@@ -193,18 +200,34 @@ final class KeyboardViewController: UIInputViewController {
 		queryBoxHeightConstraint?.isActive = true
 		queryBox.addTarget(self, action: #selector(focusQuery), for: .touchUpInside)
 		queryBox.addSubview(queryLabel)
+		queryCaret.backgroundColor = .systemBlue
+		queryCaret.layer.cornerRadius = 1
+		queryCaret.isHidden = true
+		queryCaret.isUserInteractionEnabled = false
+		queryBox.addSubview(queryCaret)
 		queryClearButton.setImage(UIImage(systemName: "xmark.circle.fill"), for: .normal)
 		queryClearButton.accessibilityLabel = "Clear input"
 		queryClearButton.isHidden = true
 		queryClearButton.addTarget(self, action: #selector(clearQuery), for: .touchUpInside)
 		queryBox.addSubview(queryClearButton)
 		queryLabel.translatesAutoresizingMaskIntoConstraints = false
+		queryCaret.translatesAutoresizingMaskIntoConstraints = false
 		queryClearButton.translatesAutoresizingMaskIntoConstraints = false
+		let caretLeadingConstraint = queryCaret.leadingAnchor.constraint(equalTo: queryBox.leadingAnchor, constant: queryBoxHorizontalPadding)
+		let caretTopConstraint = queryCaret.topAnchor.constraint(equalTo: queryBox.topAnchor, constant: queryBoxVerticalPadding)
+		let caretHeightConstraint = queryCaret.heightAnchor.constraint(equalToConstant: queryLabel.font.lineHeight)
+		queryCaretLeadingConstraint = caretLeadingConstraint
+		queryCaretTopConstraint = caretTopConstraint
+		queryCaretHeightConstraint = caretHeightConstraint
 		NSLayoutConstraint.activate([
 			queryLabel.leadingAnchor.constraint(equalTo: queryBox.leadingAnchor, constant: queryBoxHorizontalPadding),
 			queryLabel.trailingAnchor.constraint(equalTo: queryClearButton.leadingAnchor, constant: -queryClearButtonSpacing),
 			queryLabel.topAnchor.constraint(equalTo: queryBox.topAnchor, constant: queryBoxVerticalPadding),
 			queryLabel.bottomAnchor.constraint(equalTo: queryBox.bottomAnchor, constant: -queryBoxVerticalPadding),
+			caretLeadingConstraint,
+			caretTopConstraint,
+			queryCaret.widthAnchor.constraint(equalToConstant: 2),
+			caretHeightConstraint,
 			queryClearButton.trailingAnchor.constraint(equalTo: queryBox.trailingAnchor, constant: -queryClearButtonSpacing),
 			queryClearButton.topAnchor.constraint(equalTo: queryBox.topAnchor, constant: queryClearButtonTopOffset),
 			queryClearButton.widthAnchor.constraint(equalToConstant: queryClearButtonSize),
@@ -414,11 +437,12 @@ final class KeyboardViewController: UIInputViewController {
 	}
 
 	private func keyButton(_ key: String) -> UIButton {
-		let button = UIButton(type: .system)
+		let button = KeyboardKeyButton(type: .system)
 		button.layer.cornerRadius = 8
 		button.titleLabel?.font = .systemFont(ofSize: 25, weight: .regular)
 		button.heightAnchor.constraint(equalToConstant: keyHeight).isActive = true
 		button.accessibilityIdentifier = "key-\(key)"
+		button.addTarget(self, action: #selector(keyTouchDown), for: .touchDown)
 
 		let role: KeyRole
 		switch key {
@@ -535,6 +559,7 @@ final class KeyboardViewController: UIInputViewController {
 		keyboardRestoreButton.tintColor = textColor
 		closeButton.backgroundColor = isDark ? systemColor : .tertiarySystemBackground
 		closeButton.tintColor = textColor
+		queryCaret.backgroundColor = .systemBlue
 		queryClearButton.tintColor = isDark ? UIColor(white: 0.75, alpha: 1) : UIColor.secondaryLabel
 		loadingIndicator.color = isDark ? .white : .secondaryLabel
 		applyQueryInputFocus(animated: false)
@@ -542,11 +567,15 @@ final class KeyboardViewController: UIInputViewController {
 	}
 
 	private func styleKey(_ button: UIButton, backgroundColor: UIColor, tintColor: UIColor, shadow: Bool) {
-		button.backgroundColor = backgroundColor
+		if let keyButton = button as? KeyboardKeyButton {
+			keyButton.setKeyStyle(backgroundColor: backgroundColor, shadowOpacity: shadow ? 0.22 : 0)
+		} else {
+			button.backgroundColor = backgroundColor
+			button.layer.shadowOpacity = shadow ? 0.22 : 0
+		}
 		button.tintColor = tintColor
 		button.setTitleColor(tintColor, for: .normal)
 		button.layer.shadowColor = UIColor.black.cgColor
-		button.layer.shadowOpacity = shadow ? 0.22 : 0
 		button.layer.shadowRadius = 0
 		button.layer.shadowOffset = CGSize(width: 0, height: 1)
 	}
@@ -566,6 +595,11 @@ final class KeyboardViewController: UIInputViewController {
 	private func append(_ text: String) {
 		query.append(text)
 		queryDidChange()
+	}
+
+	@objc private func keyTouchDown() {
+		keyFeedback.impactOccurred(intensity: 0.35)
+		keyFeedback.prepare()
 	}
 
 	private func appendLetter(_ letter: String) {
@@ -663,6 +697,7 @@ final class KeyboardViewController: UIInputViewController {
 		SharedSettings.keyboardHasFullAccess = hasFullAccess
 		accessBox.isHidden = hasFullAccess
 		updateQueryBoxHeight()
+		updateCaretPosition()
 		updateContainerSizing()
 	}
 
@@ -673,6 +708,7 @@ final class KeyboardViewController: UIInputViewController {
 		keyboardRestoreButton.isHidden = visible
 		keyRowStacks.forEach { $0.isHidden = !visible }
 		collectionView.collectionViewLayout.invalidateLayout()
+		updateCaretVisibility()
 		updateContainerSizing()
 		view.setNeedsLayout()
 	}
@@ -706,6 +742,7 @@ final class KeyboardViewController: UIInputViewController {
 
 		queryBox.layer.borderColor = borderColor
 		queryBox.layer.borderWidth = borderWidth
+		updateCaretVisibility()
 	}
 
 	private func updateQueryBoxHeight() {
@@ -718,6 +755,66 @@ final class KeyboardViewController: UIInputViewController {
 
 		if abs((queryBoxHeightConstraint?.constant ?? 0) - height) > 0.5 {
 			queryBoxHeightConstraint?.constant = height
+		}
+	}
+
+	private func updateCaretPosition() {
+		queryBox.layoutIfNeeded()
+		queryCaretHeightConstraint?.constant = queryLabel.font.lineHeight
+		let labelFrame = queryLabel.frame
+
+		guard !query.isEmpty else {
+			queryCaretLeadingConstraint?.constant = labelFrame.minX
+			queryCaretTopConstraint?.constant = labelFrame.minY
+			updateCaretVisibility()
+			return
+		}
+
+		let textWidth = max(0, labelFrame.width)
+		let font = queryLabel.font ?? .systemFont(ofSize: 17, weight: .semibold)
+		let textStorage = NSTextStorage(string: query, attributes: [.font: font])
+		let layoutManager = NSLayoutManager()
+		let textContainer = NSTextContainer(size: CGSize(width: textWidth, height: .greatestFiniteMagnitude))
+		textContainer.lineBreakMode = .byWordWrapping
+		textContainer.lineFragmentPadding = 0
+		textContainer.maximumNumberOfLines = Int(maxQueryBoxLines)
+		layoutManager.addTextContainer(textContainer)
+		textStorage.addLayoutManager(layoutManager)
+		layoutManager.ensureLayout(for: textContainer)
+
+		let glyphRange = layoutManager.glyphRange(for: textContainer)
+		guard glyphRange.length > 0 else {
+			updateCaretVisibility()
+			return
+		}
+
+		let glyphIndex = NSMaxRange(glyphRange) - 1
+		let lineRect = layoutManager.lineFragmentUsedRect(forGlyphAt: glyphIndex, effectiveRange: nil)
+		let glyphRect = layoutManager.boundingRect(forGlyphRange: NSRange(location: glyphIndex, length: 1), in: textContainer)
+		let caretX = min(textWidth, max(0, glyphRect.maxX))
+		let caretY = lineRect.minY + max(0, (lineRect.height - font.lineHeight) / 2)
+		queryCaretLeadingConstraint?.constant = labelFrame.minX + caretX
+		queryCaretTopConstraint?.constant = labelFrame.minY + caretY
+		updateCaretVisibility()
+	}
+
+	private func updateCaretVisibility() {
+		let shouldShowCaret = typingControlsVisible && queryInputFocused
+		queryCaret.isHidden = !shouldShowCaret
+		if shouldShowCaret {
+			queryCaret.alpha = 1
+			if queryCaret.layer.animation(forKey: "queryCaretBlink") == nil {
+				let animation = CABasicAnimation(keyPath: "opacity")
+				animation.fromValue = 1
+				animation.toValue = 0
+				animation.duration = 0.55
+				animation.autoreverses = true
+				animation.repeatCount = .infinity
+				queryCaret.layer.add(animation, forKey: "queryCaretBlink")
+			}
+		} else {
+			queryCaret.layer.removeAnimation(forKey: "queryCaretBlink")
+			queryCaret.alpha = 0
 		}
 	}
 
@@ -1093,6 +1190,42 @@ final class KeyboardViewController: UIInputViewController {
 			self.isLoadingSearchResults = false
 			self.canLoadMoreSearchResults = false
 			self.updateContainerSizing()
+		}
+	}
+}
+
+private final class KeyboardKeyButton: UIButton {
+	private var normalBackgroundColor: UIColor?
+	private var normalShadowOpacity: Float = 0
+
+	override var isHighlighted: Bool {
+		didSet {
+			applyPressedState(animated: true)
+		}
+	}
+
+	func setKeyStyle(backgroundColor: UIColor, shadowOpacity: Float) {
+		normalBackgroundColor = backgroundColor
+		normalShadowOpacity = shadowOpacity
+		applyPressedState(animated: false)
+	}
+
+	private func applyPressedState(animated: Bool) {
+		let changes = {
+			self.backgroundColor = self.normalBackgroundColor
+			self.transform = self.isHighlighted ? CGAffineTransform(scaleX: 0.96, y: 0.96) : .identity
+			self.layer.shadowOpacity = self.isHighlighted ? 0 : self.normalShadowOpacity
+		}
+
+		if animated {
+			UIView.animate(
+				withDuration: isHighlighted ? 0.045 : 0.12,
+				delay: 0,
+				options: [.allowUserInteraction, .beginFromCurrentState, .curveEaseOut],
+				animations: changes
+			)
+		} else {
+			changes()
 		}
 	}
 }
