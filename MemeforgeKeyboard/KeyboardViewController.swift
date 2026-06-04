@@ -58,7 +58,10 @@ final class KeyboardViewController: UIInputViewController {
 	private let keySpacing: CGFloat = 6
 	private let rootSpacing: CGFloat = 6
 	private let topRowHeight: CGFloat = 30
-	private let queryBoxHeight: CGFloat = 34
+	private let minQueryBoxHeight: CGFloat = 34
+	private let maxQueryBoxLines: CGFloat = 5
+	private let queryBoxHorizontalPadding: CGFloat = 12
+	private let queryBoxVerticalPadding: CGFloat = 7
 	private let accessBoxHeight: CGFloat = 80
 	private let maxSearchCollectionHeight: CGFloat = 320
 	private let generatedStyles = [
@@ -79,6 +82,7 @@ final class KeyboardViewController: UIInputViewController {
 	private lazy var closeButton = smallButton("xmark", action: #selector(closeKeyboard))
 	private var heightConstraint: NSLayoutConstraint?
 	private var collectionHeightConstraint: NSLayoutConstraint?
+	private var queryBoxHeightConstraint: NSLayoutConstraint?
 
 	init() {
 		let layout = UICollectionViewFlowLayout()
@@ -114,6 +118,7 @@ final class KeyboardViewController: UIInputViewController {
 
 	override func viewDidLayoutSubviews() {
 		super.viewDidLayoutSubviews()
+		updateQueryBoxHeight()
 		updateContainerSizing()
 	}
 
@@ -124,8 +129,9 @@ final class KeyboardViewController: UIInputViewController {
 
 		queryLabel.font = .systemFont(ofSize: 17, weight: .semibold)
 		queryLabel.textColor = .label
-		queryLabel.numberOfLines = 1
-		queryLabel.lineBreakMode = .byTruncatingHead
+		queryLabel.numberOfLines = Int(maxQueryBoxLines)
+		queryLabel.lineBreakMode = .byWordWrapping
+		queryLabel.setContentCompressionResistancePriority(.required, for: .vertical)
 
 		accessTitleLabel.font = .systemFont(ofSize: 14, weight: .bold)
 		accessTitleLabel.textColor = .label
@@ -177,14 +183,16 @@ final class KeyboardViewController: UIInputViewController {
 		queryBox.layer.cornerRadius = 8
 		queryBox.layer.borderWidth = 2
 		queryBox.translatesAutoresizingMaskIntoConstraints = false
-		queryBox.heightAnchor.constraint(equalToConstant: queryBoxHeight).isActive = true
+		queryBoxHeightConstraint = queryBox.heightAnchor.constraint(equalToConstant: minQueryBoxHeight)
+		queryBoxHeightConstraint?.isActive = true
 		queryBox.addTarget(self, action: #selector(focusQuery), for: .touchUpInside)
 		queryBox.addSubview(queryLabel)
 		queryLabel.translatesAutoresizingMaskIntoConstraints = false
 		NSLayoutConstraint.activate([
-			queryLabel.leadingAnchor.constraint(equalTo: queryBox.leadingAnchor, constant: 12),
-			queryLabel.trailingAnchor.constraint(equalTo: queryBox.trailingAnchor, constant: -12),
-			queryLabel.centerYAnchor.constraint(equalTo: queryBox.centerYAnchor),
+			queryLabel.leadingAnchor.constraint(equalTo: queryBox.leadingAnchor, constant: queryBoxHorizontalPadding),
+			queryLabel.trailingAnchor.constraint(equalTo: queryBox.trailingAnchor, constant: -queryBoxHorizontalPadding),
+			queryLabel.topAnchor.constraint(equalTo: queryBox.topAnchor, constant: queryBoxVerticalPadding),
+			queryLabel.bottomAnchor.constraint(equalTo: queryBox.bottomAnchor, constant: -queryBoxVerticalPadding),
 		])
 		rootStack.addArrangedSubview(queryBox)
 
@@ -636,6 +644,7 @@ final class KeyboardViewController: UIInputViewController {
 		queryLabel.textColor = query.isEmpty ? .secondaryLabel : .label
 		SharedSettings.keyboardHasFullAccess = hasFullAccess
 		accessBox.isHidden = hasFullAccess
+		updateQueryBoxHeight()
 		updateContainerSizing()
 	}
 
@@ -681,6 +690,19 @@ final class KeyboardViewController: UIInputViewController {
 		queryBox.layer.borderWidth = borderWidth
 	}
 
+	private func updateQueryBoxHeight() {
+		let fallbackWidth = view.bounds.width - view.safeAreaInsets.left - view.safeAreaInsets.right - 16
+		let boxWidth = queryBox.bounds.width > 0 ? queryBox.bounds.width : fallbackWidth
+		let textWidth = max(0, boxWidth - queryBoxHorizontalPadding * 2)
+		let measuredHeight = queryLabel.sizeThatFits(CGSize(width: textWidth, height: .greatestFiniteMagnitude)).height
+		let maxHeight = queryLabel.font.lineHeight * maxQueryBoxLines + queryBoxVerticalPadding * 2
+		let height = ceil(min(max(measuredHeight + queryBoxVerticalPadding * 2, minQueryBoxHeight), maxHeight))
+
+		if abs((queryBoxHeightConstraint?.constant ?? 0) - height) > 0.5 {
+			queryBoxHeightConstraint?.constant = height
+		}
+	}
+
 	private func updateContainerSizing() {
 		let collectionHeight = desiredCollectionHeight()
 		if abs((collectionHeightConstraint?.constant ?? 0) - collectionHeight) > 0.5 {
@@ -694,7 +716,7 @@ final class KeyboardViewController: UIInputViewController {
 
 		var visibleHeights = [topRowHeight]
 		if typingControlsVisible {
-			visibleHeights.append(queryBoxHeight)
+			visibleHeights.append(queryBoxHeightConstraint?.constant ?? minQueryBoxHeight)
 		}
 		if !hasFullAccess {
 			visibleHeights.append(accessBoxHeight)
