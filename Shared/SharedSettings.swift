@@ -5,6 +5,8 @@ enum SharedSettings {
 	static let geminiModel = "gemini-3.1-flash-image"
 
 	private static let keyboardFullAccessKey = "keyboardHasFullAccess"
+	private static let copiedPreviewDataKey = "copiedMemePreviewData"
+	private static let copiedPreviewVersionKey = "copiedMemePreviewVersion"
 
 	static var store: UserDefaults {
 		UserDefaults(suiteName: appGroupID) ?? .standard
@@ -21,6 +23,19 @@ enum SharedSettings {
 	static var keyboardHasFullAccess: Bool {
 		get { store.bool(forKey: keyboardFullAccessKey) }
 		set { store.set(newValue, forKey: keyboardFullAccessKey) }
+	}
+
+	static var copiedMemePreviewData: Data? {
+		store.data(forKey: copiedPreviewDataKey)
+	}
+
+	static var copiedMemePreviewVersion: Double {
+		store.double(forKey: copiedPreviewVersionKey)
+	}
+
+	static func updateCopiedMemePreview(_ data: Data) {
+		store.set(data, forKey: copiedPreviewDataKey)
+		store.set(Date().timeIntervalSince1970, forKey: copiedPreviewVersionKey)
 	}
 
 	private static func bundledValue(forInfoKey key: String) -> String {

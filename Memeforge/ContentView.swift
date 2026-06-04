@@ -6,10 +6,10 @@ struct ContentView: View {
 	@State private var keyboardHasFullAccess = SharedSettings.keyboardHasFullAccess
 	@State private var keyboardTest = ""
 	@State private var copiedImage: UIImage?
-	@State private var pasteboardChangeCount = UIPasteboard.general.changeCount
+	@State private var copiedPreviewVersion = SharedSettings.copiedMemePreviewVersion
 	@FocusState private var keyboardTestFocused: Bool
 
-	private let pasteboardTimer = Timer.publish(every: 0.4, on: .main, in: .common).autoconnect()
+	private let previewTimer = Timer.publish(every: 0.4, on: .main, in: .common).autoconnect()
 
 	var body: some View {
 		NavigationStack {
@@ -54,7 +54,7 @@ struct ContentView: View {
 				refreshPermissionState()
 				refreshCopiedImage(force: true)
 			}
-			.onReceive(pasteboardTimer) { _ in
+			.onReceive(previewTimer) { _ in
 				refreshCopiedImage()
 			}
 			.onChange(of: scenePhase) { _, phase in
@@ -71,10 +71,10 @@ struct ContentView: View {
 	}
 
 	private func refreshCopiedImage(force: Bool = false) {
-		let pasteboard = UIPasteboard.general
-		guard force || pasteboard.changeCount != pasteboardChangeCount else { return }
-		pasteboardChangeCount = pasteboard.changeCount
-		copiedImage = pasteboard.image
+		let version = SharedSettings.copiedMemePreviewVersion
+		guard force || version != copiedPreviewVersion else { return }
+		copiedPreviewVersion = version
+		copiedImage = SharedSettings.copiedMemePreviewData.flatMap(UIImage.init(data:))
 	}
 
 	private func focusKeyboardTestInput() {
