@@ -68,35 +68,6 @@ private struct AppHeader: View {
 	}
 }
 
-private struct LiquidGlassPanel<Content: View>: View {
-	private let cornerRadius: CGFloat
-	private let content: Content
-
-	init(cornerRadius: CGFloat = 30, @ViewBuilder content: () -> Content) {
-		self.cornerRadius = cornerRadius
-		self.content = content()
-	}
-
-	var body: some View {
-		if #available(iOS 26, *) {
-			GlassEffectContainer(spacing: 12) {
-				content
-					.padding(12)
-					.glassEffect(.regular, in: .rect(cornerRadius: cornerRadius))
-			}
-		} else {
-			content
-				.padding(12)
-				.background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: cornerRadius))
-				.overlay {
-					RoundedRectangle(cornerRadius: cornerRadius)
-						.stroke(.white.opacity(0.28), lineWidth: 1)
-				}
-				.shadow(color: .black.opacity(0.12), radius: 24, y: 12)
-		}
-	}
-}
-
 private extension View {
 	@ViewBuilder
 	func liquidGlassSurface(cornerRadius: CGFloat, interactive: Bool = false) -> some View {
@@ -124,15 +95,6 @@ private struct MemeForgeView: View {
 
 	var body: some View {
 		VStack(spacing: 0) {
-			Picker("Mode", selection: $model.mode) {
-				ForEach(MemeMode.allCases) { mode in
-					Text(mode.title).tag(mode)
-				}
-			}
-			.pickerStyle(.segmented)
-			.padding(.horizontal)
-			.padding(.top, 8)
-
 			ScrollView {
 				VStack(alignment: .leading, spacing: 16) {
 					if model.mode == .generate, model.showingAssetPicker, !model.generationAssetCollection.isEmpty {
@@ -157,9 +119,7 @@ private struct MemeForgeView: View {
 			}
 			.scrollDismissesKeyboard(.interactively)
 			.safeAreaInset(edge: .bottom, spacing: 0) {
-				LiquidGlassPanel {
-					inputArea
-				}
+				bottomControls
 				.padding(.horizontal, 16)
 				.padding(.top, 10)
 				.padding(.bottom, 8)
@@ -185,6 +145,25 @@ private struct MemeForgeView: View {
 		.onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
 			model.refreshHistoryIfNeeded()
 			model.refreshGenerationAssetCollection()
+		}
+	}
+
+	private var bottomControls: some View {
+		Group {
+			if #available(iOS 26, *) {
+				GlassEffectContainer(spacing: 10) {
+					bottomControlsContent
+				}
+			} else {
+				bottomControlsContent
+			}
+		}
+	}
+
+	private var bottomControlsContent: some View {
+		VStack(alignment: .leading, spacing: 10) {
+			inputArea
+			ModeTabs(mode: $model.mode)
 		}
 	}
 
@@ -329,6 +308,29 @@ private struct MemeForgeView: View {
 
 }
 
+private struct ModeTabs: View {
+	@Binding var mode: MemeMode
+
+	var body: some View {
+		HStack(spacing: 10) {
+			ForEach(MemeMode.allCases) { item in
+				Button {
+					mode = item
+				} label: {
+					Text(item.title)
+						.font(.subheadline.weight(.semibold))
+						.foregroundStyle(mode == item ? .primary : .secondary)
+						.frame(height: 42)
+						.frame(maxWidth: .infinity)
+				}
+				.buttonStyle(.plain)
+				.liquidGlassSurface(cornerRadius: 18, interactive: true)
+				.accessibilityLabel(item.title)
+			}
+		}
+	}
+}
+
 private struct MemeResultsGrid: View {
 	@Bindable var model: MemeForgeModel
 
@@ -426,17 +428,17 @@ private struct SelectedGenerationAssetThumbnail: View {
 				}
 			}
 			.frame(width: 64, height: 64)
-			.background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
 			.clipShape(RoundedRectangle(cornerRadius: 8))
+			.liquidGlassSurface(cornerRadius: 12)
 
 			Button(action: remove) {
 				Image(systemName: "xmark")
 					.font(.caption2.weight(.bold))
-					.foregroundStyle(.white)
-					.frame(width: 20, height: 20)
-					.background(.black.opacity(0.72), in: Circle())
+					.foregroundStyle(.primary)
+					.frame(width: 22, height: 22)
 			}
 			.buttonStyle(.plain)
+			.liquidGlassSurface(cornerRadius: 11, interactive: true)
 			.padding(4)
 			.accessibilityLabel("Remove generation asset")
 		}
@@ -484,6 +486,7 @@ private struct GenerationAssetCollectionCell: View {
 				.aspectRatio(1, contentMode: .fill)
 				.frame(maxWidth: .infinity)
 				.clipShape(RoundedRectangle(cornerRadius: 8))
+				.liquidGlassSurface(cornerRadius: 10, interactive: true)
 
 				if item.useCount > 0 {
 					Text(item.useCount > 999 ? "999+" : "\(item.useCount)")
