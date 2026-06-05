@@ -29,6 +29,41 @@ final class KeyboardViewController: UIInputViewController {
 		let copyURL: URL?
 		let imageData: Data?
 		let pasteboardType: String
+		let useCount: Int
+
+		init(
+			title: String,
+			previewURL: URL?,
+			previewVideoURL: URL?,
+			copyURL: URL?,
+			imageData: Data?,
+			pasteboardType: String,
+			useCount: Int = 0
+		) {
+			self.title = title
+			self.previewURL = previewURL
+			self.previewVideoURL = previewVideoURL
+			self.copyURL = copyURL
+			self.imageData = imageData
+			self.pasteboardType = pasteboardType
+			self.useCount = useCount
+		}
+
+		var historyKey: String? {
+			copyURL?.absoluteString
+		}
+
+		func withUseCount(_ useCount: Int) -> MemeResult {
+			MemeResult(
+				title: title,
+				previewURL: previewURL,
+				previewVideoURL: previewVideoURL,
+				copyURL: copyURL,
+				imageData: imageData,
+				pasteboardType: pasteboardType,
+				useCount: useCount
+			)
+		}
 	}
 
 	private var mode = Mode.search
@@ -52,6 +87,8 @@ final class KeyboardViewController: UIInputViewController {
 	private var isLoadingSearchResults = false
 	private var generationID = UUID()
 	private var pendingGenerationCount = 0
+	private var historyUseCounts: [String: Int] = [:]
+	private var showingHistory = false
 	private let keyFeedback = UIImpactFeedbackGenerator(style: .light)
 
 	private let searchPageSize = 30
@@ -121,11 +158,13 @@ final class KeyboardViewController: UIInputViewController {
 			self.applyKeyboardTheme()
 		}
 		updatePrompt()
+		showHistoryIfNeeded()
 	}
 
 	override func viewWillAppear(_ animated: Bool) {
 		super.viewWillAppear(animated)
 		updatePrompt()
+		showHistoryIfNeeded()
 	}
 
 	override func viewDidLayoutSubviews() {
@@ -649,6 +688,7 @@ final class KeyboardViewController: UIInputViewController {
 		resetResults()
 		setTypingControlsVisible(true)
 		updatePrompt()
+		showHistoryIfNeeded()
 	}
 
 	@objc private func showAlphabetKeyboard() {
@@ -873,7 +913,7 @@ final class KeyboardViewController: UIInputViewController {
 			guard !results.isEmpty else { return 0 }
 			let rows = ceil(CGFloat(results.count) / 3)
 			let contentHeight = collectionContentHeight(rows: rows, side: side)
-			let visibleRows = typingControlsVisible ? CGFloat(1) : min(rows, CGFloat(3))
+			let visibleRows = typingControlsVisible && !showingHistory ? CGFloat(1) : min(rows, CGFloat(3))
 			let fittedHeight = collectionContentHeight(rows: visibleRows, side: side)
 			return min(contentHeight, min(fittedHeight, maxSearchCollectionHeight))
 		}
@@ -900,6 +940,7 @@ final class KeyboardViewController: UIInputViewController {
 	private func queryDidChange() {
 		resetResults()
 		updatePrompt()
+		showHistoryIfNeeded()
 	}
 
 	private func resetResults() {
@@ -911,9 +952,46 @@ final class KeyboardViewController: UIInputViewController {
 		generationID = UUID()
 		pendingGenerationCount = 0
 		setGenerating(false)
+		showingHistory = false
 		results = []
 		collectionView.reloadData()
 		updateContainerSizing()
+	}
+
+	private func showHistoryIfNeeded() {
+		guard mode == .search, query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+		cancelCurrentTasks()
+		searchQuery = ""
+		searchOffset = 0
+		canLoadMoreSearchResults = false
+		isLoadingSearchResults = false
+		setGenerating(false)
+
+		let history = SharedSettings.giphyMemeHistory
+		historyUseCounts = history.reduce(into: [:]) { counts, item in
+			counts[item.copyURL.absoluteString] = item.useCount
+		}
+		results = history.map { historyResult(from: $0) }
+		showingHistory = !results.isEmpty
+		collectionView.reloadData()
+		updateContainerSizing()
+	}
+
+	private func historyResult(from item: SharedSettings.GiphyMemeHistoryItem) -> MemeResult {
+		MemeResult(
+			title: item.title,
+			previewURL: item.previewURL,
+			previewVideoURL: item.previewVideoURL,
+			copyURL: item.copyURL,
+			imageData: nil,
+			pasteboardType: item.pasteboardType,
+			useCount: item.useCount
+		)
+	}
+
+	private func resultWithHistoryCount(_ result: MemeResult) -> MemeResult {
+		guard let key = result.historyKey, let useCount = historyUseCounts[key] else { return result }
+		return result.withUseCount(useCount)
 	}
 
 	private func cancelCurrentTasks() {
@@ -940,6 +1018,7 @@ final class KeyboardViewController: UIInputViewController {
 		canLoadMoreSearchResults = true
 		isLoadingSearchResults = true
 		setGenerating(false)
+		showingHistory = false
 		results = []
 		collectionView.reloadData()
 		setTypingControlsVisible(false)
@@ -1007,10 +1086,12 @@ final class KeyboardViewController: UIInputViewController {
 				let hasMore = totalCount.map { nextOffset < $0 } ?? (items.count == self.searchPageSize)
 				DispatchQueue.main.async {
 					guard self.searchQuery == searchQuery else { return }
-					self.results = replacingResults ? items : self.results + items
+					let countedItems = items.map(self.resultWithHistoryCount)
+					self.results = replacingResults ? countedItems : self.results + countedItems
 					self.searchOffset = nextOffset
 					self.canLoadMoreSearchResults = hasMore && !items.isEmpty
 					self.isLoadingSearchResults = false
+					self.showingHistory = false
 					self.collectionView.reloadData()
 					self.updateContainerSizing()
 				}
@@ -1152,15 +1233,16 @@ final class KeyboardViewController: UIInputViewController {
 			let mimeType = (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Type")
 			let pasteboardType = mimeType.flatMap { UTType(mimeType: $0)?.identifier } ?? result.pasteboardType
 			DispatchQueue.main.async {
-				self.copyImageData(data, pasteboardType: pasteboardType)
+				self.copyImageData(data, pasteboardType: pasteboardType, historyResult: result)
 			}
 		}.resume()
 	}
 
-	private func copyImageData(_ data: Data, pasteboardType: String) {
+	private func copyImageData(_ data: Data, pasteboardType: String, historyResult: MemeResult? = nil) {
 		if pasteboardType == UTType.gif.identifier || UIImage.isAnimatedGIF(data: data) {
 			UIPasteboard.general.setData(data, forPasteboardType: UTType.gif.identifier)
 			SharedSettings.updateCopiedMemePreview(data)
+			recordHistoryUse(for: historyResult, pasteboardType: UTType.gif.identifier)
 			closeKeyboard()
 			return
 		}
@@ -1168,11 +1250,29 @@ final class KeyboardViewController: UIInputViewController {
 		if let image = UIImage(data: data), let pngData = image.pngData() {
 			UIPasteboard.general.setData(pngData, forPasteboardType: UTType.png.identifier)
 			SharedSettings.updateCopiedMemePreview(pngData)
+			recordHistoryUse(for: historyResult, pasteboardType: UTType.png.identifier)
 		} else {
 			UIPasteboard.general.setData(data, forPasteboardType: pasteboardType)
 			SharedSettings.updateCopiedMemePreview(data)
+			recordHistoryUse(for: historyResult, pasteboardType: pasteboardType)
 		}
 		closeKeyboard()
+	}
+
+	private func recordHistoryUse(for result: MemeResult?, pasteboardType: String) {
+		guard let result, let copyURL = result.copyURL else { return }
+		let useCount = SharedSettings.recordGiphyMeme(
+			title: result.title,
+			previewURL: result.previewURL,
+			previewVideoURL: result.previewVideoURL,
+			copyURL: copyURL,
+			pasteboardType: pasteboardType
+		)
+
+		historyUseCounts[copyURL.absoluteString] = useCount
+		guard let index = results.firstIndex(where: { $0.id == result.id }) else { return }
+		results[index] = results[index].withUseCount(useCount)
+		collectionView.reloadItems(at: [IndexPath(item: index, section: 0)])
 	}
 
 	private nonisolated func finish() {
@@ -1256,6 +1356,7 @@ extension KeyboardViewController: UICollectionViewDataSource, UICollectionViewDe
 	}
 
 	func scrollViewDidScroll(_ scrollView: UIScrollView) {
+		guard !showingHistory else { return }
 		let remaining = scrollView.contentSize.height - scrollView.bounds.height - scrollView.contentOffset.y
 		if remaining < 240 {
 			loadMoreSearchResultsIfNeeded()
@@ -1267,6 +1368,7 @@ private final class MemeCell: UICollectionViewCell {
 	static let reuseIdentifier = "MemeCell"
 
 	private let imageView = UIImageView()
+	private let countLabel = UILabel()
 	private var representedID: UUID?
 	private var player: AVPlayer?
 	private var playerLayer: AVPlayerLayer?
@@ -1281,11 +1383,26 @@ private final class MemeCell: UICollectionViewCell {
 		imageView.contentMode = .scaleAspectFill
 		imageView.translatesAutoresizingMaskIntoConstraints = false
 		contentView.addSubview(imageView)
+
+		countLabel.backgroundColor = UIColor.black.withAlphaComponent(0.68)
+		countLabel.textColor = .white
+		countLabel.font = .systemFont(ofSize: 11, weight: .bold)
+		countLabel.textAlignment = .center
+		countLabel.layer.cornerRadius = 9
+		countLabel.layer.zPosition = 2
+		countLabel.clipsToBounds = true
+		countLabel.isHidden = true
+		countLabel.translatesAutoresizingMaskIntoConstraints = false
+		contentView.addSubview(countLabel)
 		NSLayoutConstraint.activate([
 			imageView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
 			imageView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
 			imageView.topAnchor.constraint(equalTo: contentView.topAnchor),
 			imageView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+			countLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 5),
+			countLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -5),
+			countLabel.heightAnchor.constraint(equalToConstant: 18),
+			countLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 18),
 		])
 	}
 
@@ -1305,6 +1422,8 @@ private final class MemeCell: UICollectionViewCell {
 		representedID = nil
 		imageView.isHidden = false
 		imageView.image = UIImage(systemName: "photo")
+		countLabel.isHidden = true
+		countLabel.text = nil
 	}
 
 	deinit {
@@ -1318,6 +1437,7 @@ private final class MemeCell: UICollectionViewCell {
 		representedID = result.id
 		imageView.isHidden = false
 		imageView.image = UIImage(systemName: "photo")
+		updateUseCount(result.useCount)
 
 		if let data = result.imageData {
 			imageView.image = UIImage.animatedGIF(data: data) ?? UIImage(data: data)
@@ -1354,6 +1474,7 @@ private final class MemeCell: UICollectionViewCell {
 		let layer = AVPlayerLayer(player: player)
 		layer.videoGravity = .resizeAspectFill
 		layer.frame = contentView.bounds
+		layer.zPosition = 1
 		contentView.layer.addSublayer(layer)
 		playbackObserver = NotificationCenter.default.addObserver(
 			forName: .AVPlayerItemDidPlayToEndTime,
@@ -1366,6 +1487,11 @@ private final class MemeCell: UICollectionViewCell {
 		player.play()
 		self.player = player
 		playerLayer = layer
+	}
+
+	private func updateUseCount(_ count: Int) {
+		countLabel.isHidden = count <= 0
+		countLabel.text = count > 999 ? "999+" : "\(count)"
 	}
 
 	private func stopVideo() {
