@@ -1,0 +1,44 @@
+name: TestFlight Internal Distribution
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: Commit SHA to match against an Xcode Cloud build run
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: testflight-internal-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  distribute:
+    name: Add Xcode Cloud build to internal TestFlight group
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Add build to internal TestFlight group
+        env:
+          APP_STORE_CONNECT_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          APP_STORE_CONNECT_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          APP_STORE_CONNECT_PRIVATE_KEY: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
+          ASC_WORKFLOW_ID: 8A2FE4FD-B115-4866-A097-B6D5247F8ED0
+          ASC_BETA_GROUP_ID: 0e948e46-bb2a-4202-aa78-a1304541389d
+          COMMIT_SHA: ${{ inputs.commit_sha || github.sha }}
+          TIMEOUT_MINUTES: "45"
+          POLL_INTERVAL_SECONDS: "30"
+        run: node .github/scripts/add-xcode-cloud-build-to-testflight.mjs
