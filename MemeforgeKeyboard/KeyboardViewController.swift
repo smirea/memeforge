@@ -149,6 +149,8 @@ final class KeyboardViewController: UIInputViewController {
 	private let accessBoxHeight: CGFloat = 80
 	private let requestErrorHeight: CGFloat = 132
 	private let maxSearchCollectionHeight: CGFloat = 320
+	private let maxAssetPickerKeyboardHeight: CGFloat = 720
+	private let containerVerticalPadding: CGFloat = 10
 	private let assetPickerControlsHeight: CGFloat = 34
 	private let selectedAssetsHeight: CGFloat = 66
 	private let selectedAssetSide: CGFloat = 58
@@ -1072,11 +1074,13 @@ final class KeyboardViewController: UIInputViewController {
 	}
 
 	private func updateContainerSizing() {
-		let collectionHeight = desiredCollectionHeight()
+		let selectedHeight = assetPickerVisible && !selectedGenerationAssets.isEmpty ? selectedAssetsHeight : 0
+		let collectionHeight = assetPickerVisible
+			? desiredAssetPickerCollectionHeight(selectedHeight: selectedHeight)
+			: desiredCollectionHeight()
 		if abs((collectionHeightConstraint?.constant ?? 0) - collectionHeight) > 0.5 {
 			collectionHeightConstraint?.constant = collectionHeight
 		}
-		let selectedHeight = assetPickerVisible && !selectedGenerationAssets.isEmpty ? selectedAssetsHeight : 0
 		if abs((selectedAssetsHeightConstraint?.constant ?? 0) - selectedHeight) > 0.5 {
 			selectedAssetsHeightConstraint?.constant = selectedHeight
 		}
@@ -1109,11 +1113,17 @@ final class KeyboardViewController: UIInputViewController {
 			visibleHeights.append(contentsOf: Array(repeating: keyHeight, count: keyRowStacks.count))
 		}
 
-		let verticalPadding: CGFloat = 10
 		let spacing = CGFloat(max(0, visibleHeights.count - 1)) * rootSpacing
-		let desiredHeight = ceil(verticalPadding + visibleHeights.reduce(0, +) + spacing)
-		let maxHeight: CGFloat = mode == .search && !typingControlsVisible ? 390 : 720
-		let height = min(max(desiredHeight, topRowHeight + verticalPadding), maxHeight)
+		let desiredHeight = ceil(containerVerticalPadding + visibleHeights.reduce(0, +) + spacing)
+		let maxHeight: CGFloat
+		if assetPickerVisible {
+			maxHeight = maxAssetPickerKeyboardHeight
+		} else if mode == .search && !typingControlsVisible {
+			maxHeight = 390
+		} else {
+			maxHeight = 720
+		}
+		let height = min(max(desiredHeight, topRowHeight + containerVerticalPadding), maxHeight)
 
 		if abs((heightConstraint?.constant ?? 0) - height) > 0.5 {
 			heightConstraint?.constant = height
@@ -1126,17 +1136,9 @@ final class KeyboardViewController: UIInputViewController {
 			return requestErrorHeight
 		}
 
-		let columns = assetPickerVisible ? 3 : (mode == .generate ? 2 : 3)
+		let columns = mode == .generate ? 2 : 3
 		let side = collectionItemSide(columns: CGFloat(columns))
 		guard side > 0 else { return 0 }
-
-		if assetPickerVisible {
-			guard !generationAssetCollection.isEmpty else { return 0 }
-			let rows = ceil(CGFloat(generationAssetCollection.count) / 3)
-			let contentHeight = collectionContentHeight(rows: rows, side: side)
-			let fittedHeight = collectionContentHeight(rows: min(rows, 3), side: side)
-			return min(contentHeight, min(fittedHeight, maxSearchCollectionHeight))
-		}
 
 		switch mode {
 		case .generate:
@@ -1156,6 +1158,15 @@ final class KeyboardViewController: UIInputViewController {
 			let fittedHeight = collectionContentHeight(rows: visibleRows, side: side)
 			return min(contentHeight, min(fittedHeight, maxSearchCollectionHeight))
 		}
+	}
+
+	private func desiredAssetPickerCollectionHeight(selectedHeight: CGFloat) -> CGFloat {
+		guard hasFullAccess else { return 0 }
+		let visibleChromeHeights = [topRowHeight, assetPickerControlsHeight] + (selectedHeight > 0 ? [selectedHeight] : [])
+		let visibleItemCount = visibleChromeHeights.count + 1
+		let spacing = CGFloat(max(0, visibleItemCount - 1)) * rootSpacing
+		let availableHeight = maxAssetPickerKeyboardHeight - containerVerticalPadding - visibleChromeHeights.reduce(0, +) - spacing
+		return max(0, floor(availableHeight))
 	}
 
 	private func collectionItemSide(columns: CGFloat) -> CGFloat {
