@@ -8,14 +8,29 @@
 
 ## Setup
 
-Create `Config/LocalSecrets.xcconfig` with the API keys used by the keyboard extension:
+`Config/LocalSecrets.xcconfig` is required. Xcode will fail before building if it is missing, and the build also fails if either resolved key is blank.
+
+Generate it from `.env.local`:
+
+```sh
+./Scripts/sync-local-secrets.sh
+```
+
+If `.env.local` is missing and this project is synced to env-manager, run `env-manager down` first. Otherwise create `.env.local` yourself and rerun the script:
+
+```sh
+GIPHY_API_KEY=your-giphy-api-key
+GEMINI_API_KEY=your-gemini-api-key
+```
+
+The generated `Config/LocalSecrets.xcconfig` should look like this:
 
 ```xcconfig
 GIPHY_API_KEY = your-giphy-api-key
 GEMINI_API_KEY = your-gemini-api-key
 ```
 
-`Config/Secrets.xcconfig` includes this file automatically, and `Config/LocalSecrets.xcconfig` is ignored by git.
+`Config/LocalSecrets.xcconfig` is ignored by git. Xcode cannot generate it automatically once the required `.xcconfig` include is missing, because build settings are resolved before build phases run.
 
 Open `Memeforge.xcodeproj`, build the `Memeforge` scheme, then enable the keyboard in iOS Settings:
 

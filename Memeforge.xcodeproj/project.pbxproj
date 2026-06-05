@@ -138,6 +138,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = J10000000000000000000002 /* Build configuration list for PBXNativeTarget "Memeforge" */;
 			buildPhases = (
+				P10000000000000000000001 /* Validate Secrets */,
 				K10000000000000000000001 /* Sources */,
 				H10000000000000000000001 /* Frameworks */,
 				L10000000000000000000001 /* Resources */,
@@ -157,6 +158,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = J10000000000000000000003 /* Build configuration list for PBXNativeTarget "MemeforgeKeyboard" */;
 			buildPhases = (
+				P10000000000000000000002 /* Validate Secrets */,
 				K10000000000000000000002 /* Sources */,
 				H10000000000000000000002 /* Frameworks */,
 			);
@@ -216,6 +218,49 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		P10000000000000000000001 /* Validate Secrets */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/Config/LocalSecrets.xcconfig",
+			);
+			name = "Validate Secrets";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -eu\n\nmissing=0\nif [ ! -f \"$SRCROOT/Config/LocalSecrets.xcconfig\" ]; then\n\techo \"error: Missing Config/LocalSecrets.xcconfig. Run ./Scripts/sync-local-secrets.sh.\" >&2\n\tmissing=1\nfi\n\nif [ -z \"$(printf '%s' \"${GIPHY_API_KEY:-}\" | tr -d '[:space:]')\" ]; then\n\techo \"error: GIPHY_API_KEY is empty. Update .env.local and run ./Scripts/sync-local-secrets.sh.\" >&2\n\tmissing=1\nfi\n\nif [ -z \"$(printf '%s' \"${GEMINI_API_KEY:-}\" | tr -d '[:space:]')\" ]; then\n\techo \"error: GEMINI_API_KEY is empty. Update .env.local and run ./Scripts/sync-local-secrets.sh.\" >&2\n\tmissing=1\nfi\n\nexit \"$missing\"\n";
+		};
+		P10000000000000000000002 /* Validate Secrets */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/Config/LocalSecrets.xcconfig",
+			);
+			name = "Validate Secrets";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -eu\n\nmissing=0\nif [ ! -f \"$SRCROOT/Config/LocalSecrets.xcconfig\" ]; then\n\techo \"error: Missing Config/LocalSecrets.xcconfig. Run ./Scripts/sync-local-secrets.sh.\" >&2\n\tmissing=1\nfi\n\nif [ -z \"$(printf '%s' \"${GIPHY_API_KEY:-}\" | tr -d '[:space:]')\" ]; then\n\techo \"error: GIPHY_API_KEY is empty. Update .env.local and run ./Scripts/sync-local-secrets.sh.\" >&2\n\tmissing=1\nfi\n\nif [ -z \"$(printf '%s' \"${GEMINI_API_KEY:-}\" | tr -d '[:space:]')\" ]; then\n\techo \"error: GEMINI_API_KEY is empty. Update .env.local and run ./Scripts/sync-local-secrets.sh.\" >&2\n\tmissing=1\nfi\n\nexit \"$missing\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		K10000000000000000000001 /* Sources */ = {
