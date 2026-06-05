@@ -66,9 +66,15 @@ final class KeyboardViewController: UIInputViewController {
 		}
 	}
 
+	private struct RequestError: Equatable, Sendable {
+		let title: String
+		let detail: String
+	}
+
 	private var mode = Mode.search
 	private var query = ""
 	private var results: [MemeResult] = []
+	private var requestError: RequestError?
 	private var currentTasks: [URLSessionDataTask] = []
 	private var keyRowStacks: [UIStackView] = []
 	private var letterKeyButtons: [UIButton] = []
@@ -106,6 +112,7 @@ final class KeyboardViewController: UIInputViewController {
 		queryBoxVerticalPadding + (queryLabel.font.lineHeight - queryClearButtonSize) / 2
 	}
 	private let accessBoxHeight: CGFloat = 80
+	private let requestErrorHeight: CGFloat = 132
 	private let maxSearchCollectionHeight: CGFloat = 320
 	private let generatedStyles = [
 		"Classic photographic meme style.",
@@ -122,6 +129,9 @@ final class KeyboardViewController: UIInputViewController {
 	private let accessDetailLabel = UILabel()
 	private let collectionView: UICollectionView
 	private let loadingIndicator = UIActivityIndicatorView(style: .large)
+	private let requestErrorView = UIView()
+	private let requestErrorTitleLabel = UILabel()
+	private let requestErrorDetailLabel = UILabel()
 	private let rootStack = UIStackView()
 	private lazy var keyboardRestoreButton = smallButton("keyboard", action: #selector(focusQuery))
 	private lazy var closeButton = smallButton("xmark", action: #selector(closeKeyboard))
@@ -210,6 +220,32 @@ final class KeyboardViewController: UIInputViewController {
 		collectionHeightConstraint?.isActive = true
 		collectionView.setContentHuggingPriority(.defaultLow, for: .vertical)
 		collectionView.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
+
+		requestErrorTitleLabel.font = .systemFont(ofSize: 13, weight: .bold)
+		requestErrorTitleLabel.textColor = .systemRed
+		requestErrorTitleLabel.numberOfLines = 1
+
+		requestErrorDetailLabel.font = .systemFont(ofSize: 11, weight: .medium)
+		requestErrorDetailLabel.textColor = .secondaryLabel
+		requestErrorDetailLabel.numberOfLines = 4
+		requestErrorDetailLabel.lineBreakMode = .byTruncatingTail
+
+		requestErrorView.backgroundColor = .systemBackground
+		requestErrorView.layer.cornerRadius = 8
+		requestErrorView.clipsToBounds = true
+		let requestErrorStack = UIStackView(arrangedSubviews: [requestErrorTitleLabel, requestErrorDetailLabel])
+		requestErrorStack.axis = .vertical
+		requestErrorStack.spacing = 5
+		requestErrorStack.alignment = .fill
+		requestErrorStack.translatesAutoresizingMaskIntoConstraints = false
+		requestErrorView.addSubview(requestErrorStack)
+		NSLayoutConstraint.activate([
+			requestErrorStack.leadingAnchor.constraint(equalTo: requestErrorView.leadingAnchor, constant: 12),
+			requestErrorStack.trailingAnchor.constraint(equalTo: requestErrorView.trailingAnchor, constant: -12),
+			requestErrorStack.centerYAnchor.constraint(equalTo: requestErrorView.centerYAnchor),
+			requestErrorStack.topAnchor.constraint(greaterThanOrEqualTo: requestErrorView.topAnchor, constant: 10),
+			requestErrorStack.bottomAnchor.constraint(lessThanOrEqualTo: requestErrorView.bottomAnchor, constant: -10),
+		])
 
 		rootStack.axis = .vertical
 		rootStack.spacing = rootSpacing
@@ -584,6 +620,8 @@ final class KeyboardViewController: UIInputViewController {
 		let textColor = isDark ? UIColor.white : UIColor.label
 		queryBox.backgroundColor = isDark ? UIColor(white: 0.16, alpha: 1) : UIColor.tertiarySystemBackground
 		accessBox.backgroundColor = isDark ? UIColor(white: 0.16, alpha: 1) : UIColor.systemBackground
+		requestErrorView.backgroundColor = isDark ? UIColor(white: 0.16, alpha: 1) : UIColor.systemBackground
+		requestErrorDetailLabel.textColor = isDark ? UIColor(white: 0.72, alpha: 1) : UIColor.secondaryLabel
 
 		for button in letterKeyButtons {
 			styleKey(button, backgroundColor: letterColor, tintColor: textColor, shadow: !isDark)
@@ -741,6 +779,35 @@ final class KeyboardViewController: UIInputViewController {
 		updateContainerSizing()
 	}
 
+	private func clearRequestError() {
+		guard requestError != nil else { return }
+		requestError = nil
+		updateRequestErrorView()
+		updateContainerSizing()
+	}
+
+	private func showRequestError(title: String, detail: String) {
+		requestError = RequestError(title: title, detail: detail)
+		results = []
+		showingHistory = false
+		isLoadingSearchResults = false
+		canLoadMoreSearchResults = false
+		collectionView.reloadData()
+		updateRequestErrorView()
+		updateContainerSizing()
+	}
+
+	private func updateRequestErrorView() {
+		guard let requestError, results.isEmpty else {
+			collectionView.backgroundView = nil
+			return
+		}
+
+		requestErrorTitleLabel.text = requestError.title
+		requestErrorDetailLabel.text = requestError.detail
+		collectionView.backgroundView = requestErrorView
+	}
+
 	private func setTypingControlsVisible(_ visible: Bool) {
 		typingControlsVisible = visible
 		setQueryInputFocused(visible, animated: true)
@@ -864,6 +931,7 @@ final class KeyboardViewController: UIInputViewController {
 			collectionHeightConstraint?.constant = collectionHeight
 		}
 
+		updateRequestErrorView()
 		let shouldShowCollection = hasFullAccess && collectionHeight > 0
 		collectionView.isHidden = !shouldShowCollection
 		collectionView.isScrollEnabled = mode == .search && shouldShowCollection
@@ -895,6 +963,10 @@ final class KeyboardViewController: UIInputViewController {
 
 	private func desiredCollectionHeight() -> CGFloat {
 		guard hasFullAccess else { return 0 }
+		if requestError != nil, results.isEmpty {
+			return requestErrorHeight
+		}
+
 		let columns = mode == .generate ? 2 : 3
 		let side = collectionItemSide(columns: CGFloat(columns))
 		guard side > 0 else { return 0 }
@@ -949,6 +1021,7 @@ final class KeyboardViewController: UIInputViewController {
 		searchOffset = 0
 		canLoadMoreSearchResults = false
 		isLoadingSearchResults = false
+		requestError = nil
 		generationID = UUID()
 		pendingGenerationCount = 0
 		setGenerating(false)
@@ -965,6 +1038,7 @@ final class KeyboardViewController: UIInputViewController {
 		searchOffset = 0
 		canLoadMoreSearchResults = false
 		isLoadingSearchResults = false
+		requestError = nil
 		setGenerating(false)
 
 		let history = SharedSettings.giphyMemeHistory
@@ -1001,11 +1075,17 @@ final class KeyboardViewController: UIInputViewController {
 
 	private func search() {
 		let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+		clearRequestError()
 		guard hasFullAccess else {
 			updatePrompt()
 			return
 		}
 		guard !SharedSettings.giphyAPIKey.isEmpty else {
+			setTypingControlsVisible(false)
+			showRequestError(
+				title: "GIPHY API key missing",
+				detail: "MemeforgeGIPHYAPIKey is empty in this build."
+			)
 			return
 		}
 		guard !trimmed.isEmpty else {
@@ -1046,18 +1126,38 @@ final class KeyboardViewController: UIInputViewController {
 		]
 
 		guard let url = components?.url else {
-			isLoadingSearchResults = false
+			finishSearch(
+				for: searchQuery,
+				requestError: RequestError(title: "GIPHY request failed", detail: "Could not build the search URL.")
+			)
 			return
 		}
 
-		let task = URLSession.shared.dataTask(with: url) { [weak self] data, _, error in
+		let task = URLSession.shared.dataTask(with: url) { [weak self] data, response, error in
 			guard let self else { return }
-			if error != nil {
-				self.finishSearch(for: searchQuery)
+			if let error {
+				if (error as? URLError)?.code == .cancelled {
+					self.finishSearch(for: searchQuery)
+					return
+				}
+				self.finishSearch(
+					for: searchQuery,
+					requestError: RequestError(title: "GIPHY request failed", detail: error.localizedDescription)
+				)
+				return
+			}
+			if let httpResponse = response as? HTTPURLResponse, !(200...299).contains(httpResponse.statusCode) {
+				self.finishSearch(
+					for: searchQuery,
+					requestError: Self.giphyHTTPError(statusCode: httpResponse.statusCode, data: data)
+				)
 				return
 			}
 			guard let data else {
-				self.finishSearch(for: searchQuery)
+				self.finishSearch(
+					for: searchQuery,
+					requestError: RequestError(title: "GIPHY request failed", detail: "The response did not include data.")
+				)
 				return
 			}
 
@@ -1088,15 +1188,19 @@ final class KeyboardViewController: UIInputViewController {
 					guard self.searchQuery == searchQuery else { return }
 					let countedItems = items.map(self.resultWithHistoryCount)
 					self.results = replacingResults ? countedItems : self.results + countedItems
+					self.requestError = nil
 					self.searchOffset = nextOffset
 					self.canLoadMoreSearchResults = hasMore && !items.isEmpty
 					self.isLoadingSearchResults = false
 					self.showingHistory = false
 					self.collectionView.reloadData()
 					self.updateContainerSizing()
-				}
+			}
 			} catch {
-				self.finishSearch(for: searchQuery)
+				self.finishSearch(
+					for: searchQuery,
+					requestError: RequestError(title: "Could not read GIPHY response", detail: Self.responseDetail(error: error, data: data))
+				)
 			}
 		}
 		currentTasks.append(task)
@@ -1105,11 +1209,17 @@ final class KeyboardViewController: UIInputViewController {
 
 	private func generate() {
 		let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+		clearRequestError()
 		guard hasFullAccess else {
 			updatePrompt()
 			return
 		}
 		guard !SharedSettings.geminiAPIKey.isEmpty else {
+			setTypingControlsVisible(false)
+			showRequestError(
+				title: "Gemini API key missing",
+				detail: "MemeforgeGeminiAPIKey is empty in this build."
+			)
 			return
 		}
 		guard !trimmed.isEmpty else {
@@ -1199,6 +1309,38 @@ final class KeyboardViewController: UIInputViewController {
 		return UTType(filenameExtension: pathExtension)?.identifier ?? UTType.png.identifier
 	}
 
+	private nonisolated static func giphyHTTPError(statusCode: Int, data: Data?) -> RequestError {
+		var detail = "HTTP \(statusCode)"
+		if let data,
+			let response = try? JSONDecoder().decode(GiphyErrorResponse.self, from: data),
+			let message = response.meta?.msg ?? response.message ?? response.error,
+			!message.isEmpty
+		{
+			detail += ": \(message)"
+		} else if let snippet = responseSnippet(from: data) {
+			detail += ": \(snippet)"
+		}
+		return RequestError(title: "GIPHY request failed", detail: detail)
+	}
+
+	private nonisolated static func responseDetail(error: Error, data: Data?) -> String {
+		var detail = error.localizedDescription
+		if let snippet = responseSnippet(from: data), !snippet.isEmpty {
+			detail += "\n\(snippet)"
+		}
+		return detail
+	}
+
+	private nonisolated static func responseSnippet(from data: Data?) -> String? {
+		guard let data, let text = String(data: data, encoding: .utf8) else { return nil }
+		let collapsed = text
+			.replacingOccurrences(of: "\n", with: " ")
+			.replacingOccurrences(of: "\t", with: " ")
+			.trimmingCharacters(in: .whitespacesAndNewlines)
+		guard !collapsed.isEmpty else { return nil }
+		return String(collapsed.prefix(280))
+	}
+
 	private func setGenerating(_ generating: Bool) {
 		if generating {
 			loadingIndicator.startAnimating()
@@ -1284,11 +1426,15 @@ final class KeyboardViewController: UIInputViewController {
 		}
 	}
 
-	private nonisolated func finishSearch(for searchQuery: String) {
+	private nonisolated func finishSearch(for searchQuery: String, requestError: RequestError? = nil) {
 		Task { @MainActor [weak self] in
 			guard let self, self.searchQuery == searchQuery else { return }
 			self.isLoadingSearchResults = false
 			self.canLoadMoreSearchResults = false
+			if let requestError, self.results.isEmpty {
+				self.requestError = requestError
+				self.collectionView.reloadData()
+			}
 			self.updateContainerSizing()
 		}
 	}
@@ -1509,6 +1655,16 @@ private final class MemeCell: UICollectionViewCell {
 private struct GiphyResponse: Decodable {
 	let data: [GiphyItem]
 	let pagination: GiphyPagination?
+}
+
+private struct GiphyErrorResponse: Decodable {
+	let meta: GiphyErrorMeta?
+	let message: String?
+	let error: String?
+}
+
+private struct GiphyErrorMeta: Decodable {
+	let msg: String?
 }
 
 private struct GiphyPagination: Decodable {
