@@ -1036,7 +1036,7 @@ private struct SettingsView: View {
 	@State private var keyboardTest = ""
 	@State private var copiedImage: UIImage?
 	@State private var copiedPreviewVersion = SharedSettings.copiedMemePreviewVersion
-	@FocusState private var keyboardTestFocused: Bool
+	@State private var keyboardTestFocusRequest = 0
 
 	private let previewTimer = Timer.publish(every: 0.4, on: .main, in: .common).autoconnect()
 
@@ -1055,10 +1055,8 @@ private struct SettingsView: View {
 
 			Section("Keyboard Test") {
 				HStack(spacing: 12) {
-					TextField("Test keyboard input", text: $keyboardTest)
-						.textInputAutocapitalization(.never)
-						.autocorrectionDisabled()
-						.focused($keyboardTestFocused)
+					KeyboardTestTextField(text: $keyboardTest, focusRequest: keyboardTestFocusRequest)
+						.frame(minHeight: 44)
 
 					if let copiedImage {
 						Image(uiImage: copiedImage)
@@ -1108,7 +1106,64 @@ private struct SettingsView: View {
 	}
 
 	private func focusKeyboardTestInput() {
-		keyboardTestFocused = true
+		keyboardTestFocusRequest += 1
+	}
+}
+
+private struct KeyboardTestTextField: UIViewRepresentable {
+	@Binding var text: String
+	let focusRequest: Int
+
+	func makeCoordinator() -> Coordinator {
+		Coordinator(text: $text)
+	}
+
+	func makeUIView(context: Context) -> UITextField {
+		let textField = UITextField()
+		textField.placeholder = "Test keyboard input"
+		textField.autocapitalizationType = .none
+		textField.autocorrectionType = .no
+		textField.textContentType = .none
+		textField.returnKeyType = .done
+		textField.borderStyle = .none
+		textField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+		textField.addTarget(context.coordinator, action: #selector(Coordinator.requestKeyboard(_:)), for: .touchDown)
+		textField.addTarget(context.coordinator, action: #selector(Coordinator.requestKeyboard(_:)), for: .editingDidBegin)
+		textField.addTarget(context.coordinator, action: #selector(Coordinator.textDidChange(_:)), for: .editingChanged)
+		return textField
+	}
+
+	func updateUIView(_ textField: UITextField, context: Context) {
+		if textField.text != text {
+			textField.text = text
+		}
+		guard context.coordinator.focusRequest != focusRequest else { return }
+		context.coordinator.focusRequest = focusRequest
+		DispatchQueue.main.async {
+			textField.reloadInputViews()
+			textField.becomeFirstResponder()
+		}
+	}
+
+	@MainActor
+	final class Coordinator: NSObject {
+		@Binding var text: String
+		var focusRequest = 0
+
+		init(text: Binding<String>) {
+			_text = text
+		}
+
+		@objc func textDidChange(_ textField: UITextField) {
+			text = textField.text ?? ""
+		}
+
+		@objc func requestKeyboard(_ textField: UITextField) {
+			DispatchQueue.main.async {
+				textField.reloadInputViews()
+				textField.becomeFirstResponder()
+			}
+		}
 	}
 }
 

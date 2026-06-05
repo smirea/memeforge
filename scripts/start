@@ -8,6 +8,14 @@ derived_data_path="$root_dir/.derivedData"
 app_path="$derived_data_path/Build/Products/Debug-iphonesimulator/Memeforge.app"
 bundle_id="com.stefan.memeforge"
 
+printf 'Configuring Simulator software keyboard...\n'
+defaults write com.apple.iphonesimulator ConnectHardwareKeyboard -bool false
+if pgrep -qx Simulator; then
+	printf 'Restarting Simulator to apply keyboard settings...\n'
+	osascript -e 'tell application "Simulator" to quit' >/dev/null 2>&1 || true
+	sleep 1
+fi
+
 printf 'Building Memeforge for %s...\n' "$simulator_name"
 xcodebuild \
 	-project "$root_dir/Memeforge.xcodeproj" \
