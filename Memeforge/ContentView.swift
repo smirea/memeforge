@@ -375,6 +375,9 @@ private struct ModeTabs: View {
 			}
 		}
 		.pickerStyle(.segmented)
+		.padding(2)
+		.background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+		.liquidGlassSurface(cornerRadius: 14, interactive: true)
 	}
 }
 
