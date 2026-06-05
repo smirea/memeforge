@@ -386,8 +386,10 @@ private struct LoadingTilesGrid: View {
 }
 
 private func resultGridColumns(for mode: MemeMode) -> [GridItem] {
-	let minimum: CGFloat = mode == .generate ? 156 : 106
-	return [GridItem(.adaptive(minimum: minimum), spacing: 8)]
+	guard mode != .generate else {
+		return [GridItem(.flexible(), spacing: 8)]
+	}
+	return [GridItem(.adaptive(minimum: 106), spacing: 8)]
 }
 
 private struct SelectedGenerationAssetsStrip: View {
