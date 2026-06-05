@@ -1,4 +1,5 @@
 import ImageIO
+import PhotosUI
 import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
@@ -45,6 +46,8 @@ struct ContentView: View {
 
 private struct MemeForgeView: View {
 	@Bindable var model: MemeForgeModel
+	@State private var addPickerItems: [PhotosPickerItem] = []
+	@State private var pickPickerItems: [PhotosPickerItem] = []
 	@FocusState private var inputFocused: Bool
 
 	var body: some View {
@@ -97,25 +100,65 @@ private struct MemeForgeView: View {
 		.animation(.snappy, value: model.statusMessage)
 		.onAppear {
 			model.refreshHistoryIfNeeded()
+			model.refreshGenerationAssetCollection()
 		}
 		.onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
 			model.refreshHistoryIfNeeded()
+			model.refreshGenerationAssetCollection()
 		}
 	}
 
 	private var inputArea: some View {
 		VStack(alignment: .leading, spacing: 10) {
-			TextField(model.mode.placeholder, text: $model.query, axis: .vertical)
-				.lineLimit(1...5)
-				.textFieldStyle(.roundedBorder)
-				.textInputAutocapitalization(model.mode == .search ? .never : .sentences)
-				.autocorrectionDisabled(model.mode == .search)
-				.submitLabel(model.mode == .search ? .search : .done)
-				.focused($inputFocused)
-				.onSubmit {
-					model.submit()
-					inputFocused = false
+			if model.mode == .generate && model.showingAssetPicker {
+				generationAssetPickerArea
+			} else {
+				queryInputArea
+				if model.mode == .generate, !model.selectedGenerationAssets.isEmpty {
+					SelectedGenerationAssetsStrip(assets: model.selectedGenerationAssets) { asset in
+						model.removeGenerationAsset(asset)
+					}
 				}
+			}
+		}
+		.onChange(of: addPickerItems) { _, items in
+			importPickerItems(items, saveToCollection: true)
+			addPickerItems = []
+		}
+		.onChange(of: pickPickerItems) { _, items in
+			importPickerItems(items, saveToCollection: false)
+			pickPickerItems = []
+		}
+	}
+
+	private var queryInputArea: some View {
+		VStack(alignment: .leading, spacing: 10) {
+			HStack(alignment: .top, spacing: 8) {
+				TextField(model.mode.placeholder, text: $model.query, axis: .vertical)
+					.lineLimit(1...5)
+					.textFieldStyle(.roundedBorder)
+					.textInputAutocapitalization(model.mode == .search ? .never : .sentences)
+					.autocorrectionDisabled(model.mode == .search)
+					.submitLabel(model.mode == .search ? .search : .done)
+					.focused($inputFocused)
+					.onSubmit {
+						model.submit()
+						inputFocused = false
+					}
+
+				if model.mode == .generate {
+					Button {
+						model.showingAssetPicker = true
+						inputFocused = false
+					} label: {
+						Image(systemName: "photo.stack")
+							.frame(width: 22, height: 22)
+					}
+					.buttonStyle(.bordered)
+					.disabled(model.isLoading)
+					.accessibilityLabel("Choose generation assets")
+				}
+			}
 
 			HStack(spacing: 10) {
 				Button {
@@ -136,6 +179,67 @@ private struct MemeForgeView: View {
 					}
 					.buttonStyle(.bordered)
 				}
+			}
+		}
+	}
+
+	private var generationAssetPickerArea: some View {
+		VStack(alignment: .leading, spacing: 10) {
+			HStack(spacing: 10) {
+				PhotosPicker(selection: $addPickerItems, maxSelectionCount: nil, matching: .images) {
+					Label("Add", systemImage: "plus")
+				}
+				.buttonStyle(.borderedProminent)
+				.disabled(model.isLoading)
+
+				PhotosPicker(selection: $pickPickerItems, maxSelectionCount: nil, matching: .images) {
+					Label("Pick", systemImage: "photo")
+				}
+				.buttonStyle(.bordered)
+				.disabled(model.isLoading)
+
+				Spacer()
+
+				Button {
+					model.showingAssetPicker = false
+					inputFocused = true
+				} label: {
+					Image(systemName: "keyboard")
+						.frame(width: 22, height: 22)
+				}
+				.buttonStyle(.bordered)
+				.accessibilityLabel("Return to prompt")
+			}
+
+			if !model.selectedGenerationAssets.isEmpty {
+				SelectedGenerationAssetsStrip(assets: model.selectedGenerationAssets) { asset in
+					model.removeGenerationAsset(asset)
+				}
+			}
+
+			if !model.generationAssetCollection.isEmpty {
+				GenerationAssetCollectionGrid(items: model.generationAssetCollection) { item in
+					model.insertGenerationAsset(item)
+				}
+			}
+		}
+	}
+
+	private func importPickerItems(_ items: [PhotosPickerItem], saveToCollection: Bool) {
+		guard !items.isEmpty else { return }
+		inputFocused = false
+		Task {
+			var payloads: [SharedSettings.GenerationAssetPayload] = []
+			for item in items {
+				guard let data = try? await item.loadTransferable(type: Data.self),
+					let payload = SharedSettings.normalizedGenerationAssetPayload(from: data)
+				else {
+					continue
+				}
+				payloads.append(payload)
+			}
+			await MainActor.run {
+				model.insertPickedGenerationAssets(payloads, saveToCollection: saveToCollection)
 			}
 		}
 	}
@@ -176,6 +280,122 @@ private struct MemeResultsGrid: View {
 					.padding(.vertical, 16)
 			}
 		}
+	}
+}
+
+private struct SelectedGenerationAssetsStrip: View {
+	let assets: [SelectedGenerationAsset]
+	let remove: (SelectedGenerationAsset) -> Void
+
+	var body: some View {
+		ScrollView(.horizontal, showsIndicators: false) {
+			HStack(spacing: 8) {
+				ForEach(assets) { asset in
+					SelectedGenerationAssetThumbnail(asset: asset) {
+						remove(asset)
+					}
+				}
+			}
+			.padding(.vertical, 2)
+		}
+		.frame(height: 68)
+	}
+}
+
+private struct SelectedGenerationAssetThumbnail: View {
+	let asset: SelectedGenerationAsset
+	let remove: () -> Void
+
+	var body: some View {
+		ZStack(alignment: .topTrailing) {
+			Group {
+				if let image = UIImage(data: asset.imageData) {
+					Image(uiImage: image)
+						.resizable()
+						.scaledToFill()
+				} else {
+					Image(systemName: "photo")
+						.font(.title2)
+						.foregroundStyle(.secondary)
+						.frame(maxWidth: .infinity, maxHeight: .infinity)
+				}
+			}
+			.frame(width: 64, height: 64)
+			.background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
+			.clipShape(RoundedRectangle(cornerRadius: 8))
+
+			Button(action: remove) {
+				Image(systemName: "xmark")
+					.font(.caption2.weight(.bold))
+					.foregroundStyle(.white)
+					.frame(width: 20, height: 20)
+					.background(.black.opacity(0.72), in: Circle())
+			}
+			.buttonStyle(.plain)
+			.padding(4)
+			.accessibilityLabel("Remove generation asset")
+		}
+	}
+}
+
+private struct GenerationAssetCollectionGrid: View {
+	let items: [SharedSettings.GenerationAssetItem]
+	let select: (SharedSettings.GenerationAssetItem) -> Void
+
+	private let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 3)
+
+	var body: some View {
+		LazyVGrid(columns: columns, spacing: 8) {
+			ForEach(items) { item in
+				GenerationAssetCollectionCell(item: item) {
+					select(item)
+				}
+			}
+		}
+	}
+}
+
+private struct GenerationAssetCollectionCell: View {
+	let item: SharedSettings.GenerationAssetItem
+	let select: () -> Void
+
+	@State private var image: UIImage?
+
+	var body: some View {
+		Button(action: select) {
+			ZStack(alignment: .topTrailing) {
+				ZStack {
+					Color(.secondarySystemBackground)
+					if let image {
+						Image(uiImage: image)
+							.resizable()
+							.scaledToFill()
+					} else {
+						Image(systemName: "photo")
+							.font(.title2)
+							.foregroundStyle(.secondary)
+					}
+				}
+				.aspectRatio(1, contentMode: .fill)
+				.frame(maxWidth: .infinity)
+				.clipShape(RoundedRectangle(cornerRadius: 8))
+
+				if item.useCount > 0 {
+					Text(item.useCount > 999 ? "999+" : "\(item.useCount)")
+						.font(.caption2.weight(.bold))
+						.foregroundStyle(.white)
+						.padding(.horizontal, 6)
+						.frame(minHeight: 20)
+						.background(.black.opacity(0.68), in: Capsule())
+						.padding(6)
+				}
+			}
+		}
+		.buttonStyle(.plain)
+		.task(id: item.id) {
+			image = SharedSettings.generationAssetData(for: item).flatMap(UIImage.init(data:))
+		}
+		.accessibilityLabel("Saved generation asset")
 	}
 }
 
@@ -381,8 +601,12 @@ private final class MemeForgeModel {
 		didSet {
 			guard oldValue != mode else { return }
 			SharedSettings.appMemeMode = mode.rawValue
+			if mode != .generate {
+				showingAssetPicker = false
+			}
 			resetResults()
 			refreshHistoryIfNeeded()
+			refreshGenerationAssetCollection()
 		}
 	}
 	var query = "" {
@@ -396,6 +620,15 @@ private final class MemeForgeModel {
 	var requestError: RequestError?
 	var isLoading = false
 	var showingHistory = false
+	var showingAssetPicker = false {
+		didSet {
+			if showingAssetPicker {
+				refreshGenerationAssetCollection()
+			}
+		}
+	}
+	var selectedGenerationAssets: [SelectedGenerationAsset] = []
+	var generationAssetCollection: [SharedSettings.GenerationAssetItem] = []
 	var statusMessage: String?
 	var copiedResultID: UUID?
 
@@ -418,6 +651,7 @@ private final class MemeForgeModel {
 	init() {
 		mode = MemeMode(rawValue: SharedSettings.appMemeMode) ?? .search
 		refreshHistoryIfNeeded()
+		refreshGenerationAssetCollection()
 	}
 
 	func submit() {
@@ -438,6 +672,44 @@ private final class MemeForgeModel {
 
 	func clearQuery() {
 		query = ""
+	}
+
+	func refreshGenerationAssetCollection() {
+		generationAssetCollection = SharedSettings.generationAssetCollection
+	}
+
+	func insertPickedGenerationAssets(_ payloads: [SharedSettings.GenerationAssetPayload], saveToCollection: Bool) {
+		guard !payloads.isEmpty else { return }
+
+		var assets: [SelectedGenerationAsset] = []
+		for payload in payloads {
+			if saveToCollection {
+				guard let item = SharedSettings.addGenerationAsset(payload) else { continue }
+				assets.append(SelectedGenerationAsset(collectionItem: item, imageData: payload.data))
+			} else {
+				assets.append(SelectedGenerationAsset(collectionID: nil, imageData: payload.data, mimeType: payload.mimeType, useCount: 0))
+			}
+		}
+		guard !assets.isEmpty else { return }
+
+		selectedGenerationAssets.append(contentsOf: assets)
+		refreshGenerationAssetCollection()
+		resetResults()
+	}
+
+	func insertGenerationAsset(_ item: SharedSettings.GenerationAssetItem) {
+		guard !selectedGenerationAssets.contains(where: { $0.collectionID == item.id }),
+			let data = SharedSettings.generationAssetData(for: item)
+		else {
+			return
+		}
+		selectedGenerationAssets.append(SelectedGenerationAsset(collectionItem: item, imageData: data))
+		resetResults()
+	}
+
+	func removeGenerationAsset(_ asset: SelectedGenerationAsset) {
+		selectedGenerationAssets.removeAll { $0.id == asset.id }
+		resetResults()
 	}
 
 	func refreshHistoryIfNeeded() {
@@ -567,19 +839,21 @@ private final class MemeForgeModel {
 		showingHistory = false
 		pendingGenerationCount = generatedStyles.count
 		results = []
+		let assets = selectedGenerationAssets
+		recordSelectedGenerationAssetUses(assets)
 
 		currentTask = Task { [weak self] in
-			await self?.generateResults(for: trimmed, generationID: generationID)
+			await self?.generateResults(for: trimmed, assets: assets, generationID: generationID)
 		}
 	}
 
-	private func generateResults(for prompt: String, generationID: UUID) async {
+	private func generateResults(for prompt: String, assets: [SelectedGenerationAsset], generationID: UUID) async {
 		var firstError: RequestError?
 
 		await withTaskGroup(of: Result<MemeResult, RequestError>.self) { group in
 			for style in generatedStyles {
 				group.addTask {
-					await Self.geminiResult(for: prompt, style: style)
+					await Self.geminiResult(for: prompt, style: style, assets: assets)
 				}
 			}
 
@@ -600,6 +874,21 @@ private final class MemeForgeModel {
 		pendingGenerationCount = 0
 		if results.isEmpty {
 			requestError = firstError ?? RequestError(title: "Generation failed", detail: "No image data came back from Gemini.")
+		}
+	}
+
+	private func recordSelectedGenerationAssetUses(_ assets: [SelectedGenerationAsset]) {
+		let counts = SharedSettings.recordGenerationAssetUses(assets.compactMap(\.collectionID))
+		guard !counts.isEmpty else { return }
+
+		refreshGenerationAssetCollection()
+		for index in selectedGenerationAssets.indices {
+			guard let collectionID = selectedGenerationAssets[index].collectionID,
+				let useCount = counts[collectionID]
+			else {
+				continue
+			}
+			selectedGenerationAssets[index].useCount = useCount
 		}
 	}
 
@@ -694,7 +983,7 @@ private final class MemeForgeModel {
 		}
 	}
 
-	private nonisolated static func geminiResult(for prompt: String, style: String) async -> Result<MemeResult, RequestError> {
+	private nonisolated static func geminiResult(for prompt: String, style: String, assets: [SelectedGenerationAsset]) async -> Result<MemeResult, RequestError> {
 		guard let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(SharedSettings.geminiModel):generateContent") else {
 			return .failure(RequestError(title: "Generation failed", detail: "Could not build the Gemini URL."))
 		}
@@ -703,7 +992,7 @@ private final class MemeForgeModel {
 		request.httpMethod = "POST"
 		request.setValue(SharedSettings.geminiAPIKey, forHTTPHeaderField: "x-goog-api-key")
 		request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-		request.httpBody = geminiRequestBody(for: prompt, style: style)
+		request.httpBody = geminiRequestBody(for: prompt, style: style, assets: assets)
 
 		do {
 			let (data, response) = try await URLSession.shared.data(for: request)
@@ -764,7 +1053,19 @@ private final class MemeForgeModel {
 		return CopyPayload(data: data, pasteboardType: pasteboardType)
 	}
 
-	private nonisolated static func geminiRequestBody(for idea: String, style: String) -> Data? {
+	private nonisolated static func geminiRequestBody(for idea: String, style: String, assets: [SelectedGenerationAsset]) -> Data? {
+		var parts: [[String: Any]] = [
+			["text": idea],
+		]
+		parts.append(contentsOf: assets.map { asset in
+			[
+				"inlineData": [
+					"mimeType": asset.mimeType,
+					"data": asset.imageData.base64EncodedString(),
+				],
+			]
+		})
+
 		let body: [String: Any] = [
 			"systemInstruction": [
 				"parts": [
@@ -773,9 +1074,7 @@ private final class MemeForgeModel {
 			],
 			"contents": [
 				[
-					"parts": [
-						["text": idea],
-					],
+					"parts": parts,
 				],
 			],
 			"generationConfig": [
@@ -1008,6 +1307,31 @@ private struct SearchPage: Sendable {
 private struct CopyPayload: Sendable {
 	let data: Data
 	let pasteboardType: String
+}
+
+private struct SelectedGenerationAsset: Identifiable, Hashable, Sendable {
+	let id: UUID
+	let collectionID: UUID?
+	let imageData: Data
+	let mimeType: String
+	var useCount: Int
+
+	init(id: UUID = UUID(), collectionID: UUID?, imageData: Data, mimeType: String, useCount: Int) {
+		self.id = id
+		self.collectionID = collectionID
+		self.imageData = imageData
+		self.mimeType = mimeType
+		self.useCount = useCount
+	}
+
+	init(collectionItem: SharedSettings.GenerationAssetItem, imageData: Data) {
+		self.init(
+			collectionID: collectionItem.id,
+			imageData: imageData,
+			mimeType: collectionItem.mimeType,
+			useCount: collectionItem.useCount
+		)
+	}
 }
 
 private struct GiphyResponse: Decodable {
