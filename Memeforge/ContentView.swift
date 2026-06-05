@@ -1,3 +1,4 @@
+import AVFoundation
 import ImageIO
 import PhotosUI
 import SwiftUI
@@ -339,7 +340,7 @@ private struct MemeResultsGrid: View {
 	}
 
 	var body: some View {
-		LazyVGrid(columns: columns, spacing: 8) {
+		LazyVGrid(columns: columns, spacing: 0) {
 			ForEach(model.results) { result in
 				MemeResultCell(result: result, copied: model.copiedResultID == result.id) {
 					model.copy(result)
@@ -371,7 +372,7 @@ private struct LoadingTilesGrid: View {
 	}
 
 	var body: some View {
-		LazyVGrid(columns: columns, spacing: 8) {
+		LazyVGrid(columns: columns, spacing: 0) {
 			ForEach(0..<tileCount, id: \.self) { _ in
 				ZStack {
 					Color(.secondarySystemBackground)
@@ -379,7 +380,7 @@ private struct LoadingTilesGrid: View {
 						.controlSize(.small)
 				}
 				.aspectRatio(1, contentMode: .fit)
-				.clipShape(RoundedRectangle(cornerRadius: 8))
+				.clipped()
 			}
 		}
 	}
@@ -387,9 +388,9 @@ private struct LoadingTilesGrid: View {
 
 private func resultGridColumns(for mode: MemeMode) -> [GridItem] {
 	guard mode != .generate else {
-		return [GridItem(.flexible(), spacing: 8)]
+		return [GridItem(.flexible(), spacing: 0)]
 	}
-	return [GridItem(.adaptive(minimum: 106), spacing: 8)]
+	return [GridItem(.adaptive(minimum: 106), spacing: 0)]
 }
 
 private struct SelectedGenerationAssetsStrip: View {
@@ -520,8 +521,8 @@ private struct MemeResultCell: View {
 				MemePreview(result: result)
 					.frame(maxWidth: .infinity)
 					.aspectRatio(1, contentMode: .fit)
-					.clipShape(RoundedRectangle(cornerRadius: 8))
-					.background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
+					.clipped()
+					.background(Color(.secondarySystemBackground))
 
 				if result.useCount > 0 {
 					Text(result.useCount > 999 ? "999+" : "\(result.useCount)")
@@ -540,7 +541,7 @@ private struct MemeResultCell: View {
 						.padding(6)
 				}
 			}
-			.contentShape(RoundedRectangle(cornerRadius: 8))
+			.contentShape(Rectangle())
 		}
 		.buttonStyle(.plain)
 		.accessibilityLabel(result.title.isEmpty ? "Meme" : result.title)
@@ -548,45 +549,135 @@ private struct MemeResultCell: View {
 	}
 }
 
-private struct MemePreview: View {
+private struct MemePreview: UIViewRepresentable {
 	let result: MemeResult
 
-	var body: some View {
-		GeometryReader { proxy in
-			ZStack {
-				Color(.secondarySystemBackground)
+	func makeUIView(context: Context) -> MemePreviewUIView {
+		MemePreviewUIView()
+	}
 
-				if let imageData = result.imageData, let image = UIImage.animatedGIF(data: imageData) ?? UIImage(data: imageData) {
-					Image(uiImage: image)
-						.resizable()
-						.scaledToFill()
-						.frame(width: proxy.size.width, height: proxy.size.height)
-						.clipped()
-				} else if let url = result.previewURL {
-					AsyncImage(url: url) { phase in
-						switch phase {
-						case .empty:
-							ProgressView()
-						case .success(let image):
-							image
-								.resizable()
-								.scaledToFill()
-								.frame(width: proxy.size.width, height: proxy.size.height)
-								.clipped()
-						case .failure:
-							Image(systemName: "photo")
-								.font(.title2)
-								.foregroundStyle(.secondary)
-						@unknown default:
-							EmptyView()
-						}
-					}
-				} else {
-					Image(systemName: "photo")
-						.font(.title2)
-						.foregroundStyle(.secondary)
-				}
+	func updateUIView(_ uiView: MemePreviewUIView, context: Context) {
+		uiView.configure(with: result)
+	}
+
+	static func dismantleUIView(_ uiView: MemePreviewUIView, coordinator: ()) {
+		uiView.reset()
+	}
+}
+
+private final class MemePreviewUIView: UIView {
+	private let imageView = UIImageView()
+	private var representedID: UUID?
+	private var loadTask: URLSessionDataTask?
+	private var player: AVPlayer?
+	private var playerLayer: AVPlayerLayer?
+	private var playbackObserver: NSObjectProtocol?
+
+	override init(frame: CGRect) {
+		super.init(frame: frame)
+		clipsToBounds = true
+		backgroundColor = .secondarySystemBackground
+
+		imageView.contentMode = .scaleAspectFill
+		imageView.tintColor = .secondaryLabel
+		imageView.translatesAutoresizingMaskIntoConstraints = false
+		addSubview(imageView)
+		NSLayoutConstraint.activate([
+			imageView.leadingAnchor.constraint(equalTo: leadingAnchor),
+			imageView.trailingAnchor.constraint(equalTo: trailingAnchor),
+			imageView.topAnchor.constraint(equalTo: topAnchor),
+			imageView.bottomAnchor.constraint(equalTo: bottomAnchor),
+		])
+	}
+
+	@available(*, unavailable)
+	required init?(coder: NSCoder) {
+		fatalError("init(coder:) has not been implemented")
+	}
+
+	override func layoutSubviews() {
+		super.layoutSubviews()
+		playerLayer?.frame = bounds
+	}
+
+	func configure(with result: MemeResult) {
+		guard representedID != result.id else { return }
+		reset()
+		representedID = result.id
+		imageView.isHidden = false
+		imageView.image = UIImage(systemName: "photo")
+
+		if let data = result.imageData {
+			imageView.image = UIImage.animatedGIF(data: data) ?? UIImage(data: data)
+			imageView.startAnimating()
+			return
+		}
+
+		if let previewVideoURL = result.previewVideoURL {
+			playVideo(previewVideoURL)
+			if let previewURL = result.previewURL {
+				loadImage(previewURL, id: result.id)
 			}
+			return
+		}
+
+		guard let previewURL = result.previewURL else { return }
+		loadImage(previewURL, id: result.id)
+	}
+
+	func reset() {
+		loadTask?.cancel()
+		loadTask = nil
+		stopVideo()
+		representedID = nil
+		imageView.isHidden = false
+		imageView.image = nil
+	}
+
+	private func loadImage(_ url: URL, id: UUID) {
+		let task = URLSession.shared.dataTask(with: url) { [weak self] data, _, _ in
+			guard let self, let data else { return }
+			let image = UIImage.animatedGIF(data: data) ?? UIImage(data: data)
+			guard let image else { return }
+			DispatchQueue.main.async {
+				guard self.representedID == id else { return }
+				self.imageView.image = image
+				self.imageView.startAnimating()
+			}
+		}
+		loadTask = task
+		task.resume()
+	}
+
+	private func playVideo(_ url: URL) {
+		let player = AVPlayer(url: url)
+		player.isMuted = true
+		let layer = AVPlayerLayer(player: player)
+		layer.videoGravity = .resizeAspectFill
+		layer.frame = bounds
+		layer.zPosition = 1
+		self.layer.addSublayer(layer)
+		playbackObserver = NotificationCenter.default.addObserver(
+			forName: .AVPlayerItemDidPlayToEndTime,
+			object: player.currentItem,
+			queue: .main
+		) { [weak player] _ in
+			player?.seek(to: .zero)
+			player?.play()
+		}
+		player.play()
+		self.player = player
+		playerLayer = layer
+	}
+
+	private func stopVideo() {
+		player?.pause()
+		player = nil
+		playerLayer?.removeFromSuperlayer()
+		playerLayer = nil
+		if let playbackObserver {
+			NotificationCenter.default.removeObserver(playbackObserver)
+			self.playbackObserver = nil
 		}
 	}
 }
