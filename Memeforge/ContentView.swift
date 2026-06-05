@@ -12,7 +12,7 @@ struct ContentView: View {
 	var body: some View {
 		NavigationStack {
 			VStack(spacing: 0) {
-				AppHeader(title: showsSettings ? "Settings" : "Memeforge") {
+				AppHeader(title: showsSettings ? "Settings" : "Memeforge", settingsActive: showsSettings) {
 					toggleMode()
 				}
 
@@ -43,6 +43,7 @@ struct ContentView: View {
 
 private struct AppHeader: View {
 	let title: String
+	let settingsActive: Bool
 	let toggleMode: () -> Void
 
 	var body: some View {
@@ -55,13 +56,22 @@ private struct AppHeader: View {
 			Spacer()
 
 			Button(action: toggleMode) {
-				Image(systemName: "gearshape")
+				Image(systemName: settingsActive ? "gearshape.fill" : "gearshape")
 					.font(.title3.weight(.semibold))
+					.foregroundStyle(settingsActive ? Color.accentColor : Color.primary)
 					.frame(width: 48, height: 48)
+					.background {
+						if settingsActive {
+							Circle()
+								.fill(Color.accentColor.opacity(0.18))
+						}
+					}
 			}
 			.buttonStyle(.plain)
 			.liquidGlassSurface(cornerRadius: 24, interactive: true)
-			.accessibilityLabel(title == "Settings" ? "Show Memeforge" : "Show settings")
+			.accessibilityLabel(settingsActive ? "Show Memeforge" : "Show settings")
+			.accessibilityValue(settingsActive ? "On" : "Off")
+			.accessibilityAddTraits(settingsActive ? .isSelected : [])
 		}
 		.padding(.horizontal, 16)
 		.padding(.top, 10)
