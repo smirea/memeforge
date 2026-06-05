@@ -318,22 +318,13 @@ private struct ModeTabs: View {
 	@Binding var mode: MemeMode
 
 	var body: some View {
-		HStack(spacing: 10) {
+		Picker("Mode", selection: $mode) {
 			ForEach(MemeMode.allCases) { item in
-				Button {
-					mode = item
-				} label: {
-					Text(item.title)
-						.font(.subheadline.weight(.semibold))
-						.foregroundStyle(mode == item ? .primary : .secondary)
-						.frame(height: 42)
-						.frame(maxWidth: .infinity)
-				}
-				.buttonStyle(.plain)
-				.liquidGlassSurface(cornerRadius: 18, interactive: true)
-				.accessibilityLabel(item.title)
+				Text(item.title)
+					.tag(item)
 			}
 		}
+		.pickerStyle(.segmented)
 	}
 }
 
