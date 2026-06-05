@@ -238,7 +238,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "set -eu\n\nmissing=0\nif [ ! -f \"$SRCROOT/Config/LocalSecrets.xcconfig\" ]; then\n\techo \"error: Missing Config/LocalSecrets.xcconfig. Run ./Scripts/sync-local-secrets.sh.\" >&2\n\tmissing=1\nfi\n\nif [ -z \"$(printf '%s' \"${GIPHY_API_KEY:-}\" | tr -d '[:space:]')\" ]; then\n\techo \"error: GIPHY_API_KEY is empty. Update .env.local and run ./Scripts/sync-local-secrets.sh.\" >&2\n\tmissing=1\nfi\n\nif [ -z \"$(printf '%s' \"${GEMINI_API_KEY:-}\" | tr -d '[:space:]')\" ]; then\n\techo \"error: GEMINI_API_KEY is empty. Update .env.local and run ./Scripts/sync-local-secrets.sh.\" >&2\n\tmissing=1\nfi\n\nexit \"$missing\"\n";
+			shellScript = "set -eu\n\nmissing=0\nif [ ! -f \"$SRCROOT/Config/LocalSecrets.xcconfig\" ]; then\n\techo \"error: Missing Config/LocalSecrets.xcconfig. Run env-manager down.\" >&2\n\tmissing=1\nfi\n\nif [ -z \"$(printf '%s' \"${GIPHY_API_KEY:-}\" | tr -d '[:space:]')\" ]; then\n\techo \"error: GIPHY_API_KEY is empty. Run env-manager down or update Config/LocalSecrets.xcconfig.\" >&2\n\tmissing=1\nfi\n\nif [ -z \"$(printf '%s' \"${GEMINI_API_KEY:-}\" | tr -d '[:space:]')\" ]; then\n\techo \"error: GEMINI_API_KEY is empty. Run env-manager down or update Config/LocalSecrets.xcconfig.\" >&2\n\tmissing=1\nfi\n\nexit \"$missing\"\n";
 		};
 		P10000000000000000000002 /* Validate Secrets */ = {
 			isa = PBXShellScriptBuildPhase;
@@ -258,7 +258,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "set -eu\n\nmissing=0\nif [ ! -f \"$SRCROOT/Config/LocalSecrets.xcconfig\" ]; then\n\techo \"error: Missing Config/LocalSecrets.xcconfig. Run ./Scripts/sync-local-secrets.sh.\" >&2\n\tmissing=1\nfi\n\nif [ -z \"$(printf '%s' \"${GIPHY_API_KEY:-}\" | tr -d '[:space:]')\" ]; then\n\techo \"error: GIPHY_API_KEY is empty. Update .env.local and run ./Scripts/sync-local-secrets.sh.\" >&2\n\tmissing=1\nfi\n\nif [ -z \"$(printf '%s' \"${GEMINI_API_KEY:-}\" | tr -d '[:space:]')\" ]; then\n\techo \"error: GEMINI_API_KEY is empty. Update .env.local and run ./Scripts/sync-local-secrets.sh.\" >&2\n\tmissing=1\nfi\n\nexit \"$missing\"\n";
+			shellScript = "set -eu\n\nmissing=0\nif [ ! -f \"$SRCROOT/Config/LocalSecrets.xcconfig\" ]; then\n\techo \"error: Missing Config/LocalSecrets.xcconfig. Run env-manager down.\" >&2\n\tmissing=1\nfi\n\nif [ -z \"$(printf '%s' \"${GIPHY_API_KEY:-}\" | tr -d '[:space:]')\" ]; then\n\techo \"error: GIPHY_API_KEY is empty. Run env-manager down or update Config/LocalSecrets.xcconfig.\" >&2\n\tmissing=1\nfi\n\nif [ -z \"$(printf '%s' \"${GEMINI_API_KEY:-}\" | tr -d '[:space:]')\" ]; then\n\techo \"error: GEMINI_API_KEY is empty. Run env-manager down or update Config/LocalSecrets.xcconfig.\" >&2\n\tmissing=1\nfi\n\nexit \"$missing\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 

@@ -10,27 +10,20 @@
 
 `Config/LocalSecrets.xcconfig` is required. Xcode will fail before building if it is missing, and the build also fails if either resolved key is blank.
 
-Generate it from `.env.local` or exported environment variables:
+Generate it from env-manager:
 
 ```sh
-./Scripts/sync-local-secrets.sh
+env-manager down
 ```
 
-If `.env.local` is missing and this project is synced to env-manager, run `env-manager down` first. Otherwise create `.env.local` yourself and rerun the script:
-
-```sh
-GIPHY_API_KEY=your-giphy-api-key
-GEMINI_API_KEY=your-gemini-api-key
-```
-
-For Xcode Cloud, add `GIPHY_API_KEY` and `GEMINI_API_KEY` as workflow environment variables or secrets. The committed `ci_scripts/ci_post_clone.sh` script writes `Config/LocalSecrets.xcconfig` before Xcode Cloud starts `xcodebuild`.
-
-The generated `Config/LocalSecrets.xcconfig` should look like this:
+If you are not using env-manager, create `Config/LocalSecrets.xcconfig` yourself:
 
 ```xcconfig
 GIPHY_API_KEY = your-giphy-api-key
 GEMINI_API_KEY = your-gemini-api-key
 ```
+
+For Xcode Cloud, add `GIPHY_API_KEY` and `GEMINI_API_KEY` as workflow environment variables or secrets. The committed `ci_scripts/ci_post_clone.sh` script writes `Config/LocalSecrets.xcconfig` before Xcode Cloud starts `xcodebuild`.
 
 `Config/LocalSecrets.xcconfig` is ignored by git. Normal Xcode build phases cannot generate it once the required `.xcconfig` include is missing, because build settings are resolved before build phases run.
 
