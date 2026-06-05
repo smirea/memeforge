@@ -116,7 +116,8 @@ private struct MemeForgeView: View {
 						MemeResultsGrid(model: model)
 					}
 				}
-				.padding()
+				.padding(.horizontal, contentHorizontalPadding)
+				.padding(.vertical, 16)
 			}
 			.scrollDismissesKeyboard(.interactively)
 			.safeAreaInset(edge: .bottom, spacing: 0) {
@@ -147,6 +148,10 @@ private struct MemeForgeView: View {
 			model.refreshHistoryIfNeeded()
 			model.refreshGenerationAssetCollection()
 		}
+	}
+
+	private var contentHorizontalPadding: CGFloat {
+		model.mode == .search && !model.results.isEmpty ? 0 : 16
 	}
 
 	private var bottomControls: some View {
@@ -374,13 +379,10 @@ private struct LoadingTilesGrid: View {
 	var body: some View {
 		LazyVGrid(columns: columns, spacing: 0) {
 			ForEach(0..<tileCount, id: \.self) { _ in
-				ZStack {
-					Color(.secondarySystemBackground)
+				SquareThumbnailTile {
 					ProgressView()
 						.controlSize(.small)
 				}
-				.aspectRatio(1, contentMode: .fit)
-				.clipped()
 			}
 		}
 	}
@@ -452,10 +454,10 @@ private struct GenerationAssetCollectionGrid: View {
 	let items: [SharedSettings.GenerationAssetItem]
 	let select: (SharedSettings.GenerationAssetItem) -> Void
 
-	private let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 3)
+	private let columns = Array(repeating: GridItem(.flexible(), spacing: 0), count: 3)
 
 	var body: some View {
-		LazyVGrid(columns: columns, spacing: 8) {
+		LazyVGrid(columns: columns, spacing: 0) {
 			ForEach(items) { item in
 				GenerationAssetCollectionCell(item: item) {
 					select(item)
@@ -474,8 +476,7 @@ private struct GenerationAssetCollectionCell: View {
 	var body: some View {
 		Button(action: select) {
 			ZStack(alignment: .topTrailing) {
-				ZStack {
-					Color(.secondarySystemBackground)
+				SquareThumbnailTile {
 					if let image {
 						Image(uiImage: image)
 							.resizable()
@@ -486,10 +487,6 @@ private struct GenerationAssetCollectionCell: View {
 							.foregroundStyle(.secondary)
 					}
 				}
-				.aspectRatio(1, contentMode: .fill)
-				.frame(maxWidth: .infinity)
-				.clipShape(RoundedRectangle(cornerRadius: 8))
-				.liquidGlassSurface(cornerRadius: 10, interactive: true)
 
 				if item.useCount > 0 {
 					Text(item.useCount > 999 ? "999+" : "\(item.useCount)")
@@ -501,6 +498,7 @@ private struct GenerationAssetCollectionCell: View {
 						.padding(6)
 				}
 			}
+			.contentShape(Rectangle())
 		}
 		.buttonStyle(.plain)
 		.task(id: item.id) {
@@ -518,11 +516,9 @@ private struct MemeResultCell: View {
 	var body: some View {
 		Button(action: copy) {
 			ZStack(alignment: .topTrailing) {
-				MemePreview(result: result)
-					.frame(maxWidth: .infinity)
-					.aspectRatio(1, contentMode: .fit)
-					.clipped()
-					.background(Color(.secondarySystemBackground))
+				SquareThumbnailTile {
+					MemePreview(result: result)
+				}
 
 				if result.useCount > 0 {
 					Text(result.useCount > 999 ? "999+" : "\(result.useCount)")
@@ -546,6 +542,27 @@ private struct MemeResultCell: View {
 		.buttonStyle(.plain)
 		.accessibilityLabel(result.title.isEmpty ? "Meme" : result.title)
 		.accessibilityHint("Copies this meme")
+	}
+}
+
+private struct SquareThumbnailTile<Content: View>: View {
+	private let content: Content
+
+	init(@ViewBuilder content: () -> Content) {
+		self.content = content()
+	}
+
+	var body: some View {
+		Color(.secondarySystemBackground)
+			.aspectRatio(1, contentMode: .fit)
+			.overlay {
+				GeometryReader { proxy in
+					content
+						.frame(width: proxy.size.width, height: proxy.size.height)
+						.clipped()
+				}
+			}
+		.clipped()
 	}
 }
 
