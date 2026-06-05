@@ -135,6 +135,12 @@ private struct MemeForgeView: View {
 
 			ScrollView {
 				VStack(alignment: .leading, spacing: 16) {
+					if model.mode == .generate, model.showingAssetPicker, !model.generationAssetCollection.isEmpty {
+						GenerationAssetCollectionGrid(items: model.generationAssetCollection) { item in
+							model.insertGenerationAsset(item)
+						}
+					}
+
 					if let requestError = model.requestError {
 						RequestErrorView(requestError: requestError)
 					}
@@ -262,6 +268,12 @@ private struct MemeForgeView: View {
 
 	private var generationAssetPickerArea: some View {
 		VStack(alignment: .leading, spacing: 10) {
+			if !model.selectedGenerationAssets.isEmpty {
+				SelectedGenerationAssetsStrip(assets: model.selectedGenerationAssets) { asset in
+					model.removeGenerationAsset(asset)
+				}
+			}
+
 			HStack(spacing: 10) {
 				PhotosPicker(selection: $addPickerItems, maxSelectionCount: nil, matching: .images) {
 					Label("Add", systemImage: "plus")
@@ -292,18 +304,6 @@ private struct MemeForgeView: View {
 				.buttonStyle(.plain)
 				.liquidGlassSurface(cornerRadius: 18, interactive: true)
 				.accessibilityLabel("Return to prompt")
-			}
-
-			if !model.selectedGenerationAssets.isEmpty {
-				SelectedGenerationAssetsStrip(assets: model.selectedGenerationAssets) { asset in
-					model.removeGenerationAsset(asset)
-				}
-			}
-
-			if !model.generationAssetCollection.isEmpty {
-				GenerationAssetCollectionGrid(items: model.generationAssetCollection) { item in
-					model.insertGenerationAsset(item)
-				}
 			}
 		}
 	}
