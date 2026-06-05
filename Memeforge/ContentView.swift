@@ -651,7 +651,7 @@ private struct SettingsView: View {
 					}
 				}
 				.contentShape(Rectangle())
-				.simultaneousGesture(TapGesture().onEnded(focusKeyboardTestInput))
+				.onTapGesture(perform: focusKeyboardTestInput)
 			}
 
 			Section("Generation") {
@@ -689,10 +689,7 @@ private struct SettingsView: View {
 	}
 
 	private func focusKeyboardTestInput() {
-		keyboardTestFocused = false
-		DispatchQueue.main.async {
-			keyboardTestFocused = true
-		}
+		keyboardTestFocused = true
 	}
 }
 
