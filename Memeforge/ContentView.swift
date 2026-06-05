@@ -130,6 +130,7 @@ private struct MemeForgeView: View {
 						}
 					}
 				}
+				.frame(maxWidth: .infinity, alignment: .leading)
 				.padding(.horizontal, contentHorizontalPadding)
 				.padding(.vertical, 16)
 			}
@@ -403,6 +404,7 @@ private struct MemeResultsGrid: View {
 					.padding(.vertical, 16)
 			}
 		}
+		.frame(maxWidth: .infinity)
 	}
 }
 
