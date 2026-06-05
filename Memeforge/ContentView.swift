@@ -10,22 +10,18 @@ struct ContentView: View {
 
 	var body: some View {
 		NavigationStack {
-			Group {
+			VStack(spacing: 0) {
+				AppHeader(title: showsSettings ? "Settings" : "Memeforge") {
+					toggleMode()
+				}
+
 				if showsSettings {
 					SettingsView()
 				} else {
 					MemeForgeView(model: model)
 				}
 			}
-			.navigationTitle(showsSettings ? "Settings" : "Memeforge")
-			.toolbar {
-				ToolbarItem(placement: .topBarTrailing) {
-					Button(action: toggleMode) {
-						Image(systemName: "gearshape")
-					}
-					.accessibilityLabel(showsSettings ? "Show Memeforge" : "Show settings")
-				}
-			}
+			.toolbar(.hidden, for: .navigationBar)
 			.onOpenURL { url in
 				if url.host == "setup" || url.path == "/setup" {
 					setShowsSettings(true)
@@ -41,6 +37,82 @@ struct ContentView: View {
 	private func setShowsSettings(_ value: Bool) {
 		showsSettings = value
 		SharedSettings.appShowsSettings = value
+	}
+}
+
+private struct AppHeader: View {
+	let title: String
+	let toggleMode: () -> Void
+
+	var body: some View {
+		HStack(alignment: .center, spacing: 16) {
+			Text(title)
+				.font(.largeTitle.weight(.bold))
+				.lineLimit(1)
+				.minimumScaleFactor(0.75)
+
+			Spacer()
+
+			Button(action: toggleMode) {
+				Image(systemName: "gearshape")
+					.font(.title3.weight(.semibold))
+					.frame(width: 48, height: 48)
+			}
+			.buttonStyle(.plain)
+			.liquidGlassSurface(cornerRadius: 24, interactive: true)
+			.accessibilityLabel(title == "Settings" ? "Show Memeforge" : "Show settings")
+		}
+		.padding(.horizontal, 16)
+		.padding(.top, 10)
+		.padding(.bottom, 8)
+	}
+}
+
+private struct LiquidGlassPanel<Content: View>: View {
+	private let cornerRadius: CGFloat
+	private let content: Content
+
+	init(cornerRadius: CGFloat = 30, @ViewBuilder content: () -> Content) {
+		self.cornerRadius = cornerRadius
+		self.content = content()
+	}
+
+	var body: some View {
+		if #available(iOS 26, *) {
+			GlassEffectContainer(spacing: 12) {
+				content
+					.padding(12)
+					.glassEffect(.regular, in: .rect(cornerRadius: cornerRadius))
+			}
+		} else {
+			content
+				.padding(12)
+				.background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: cornerRadius))
+				.overlay {
+					RoundedRectangle(cornerRadius: cornerRadius)
+						.stroke(.white.opacity(0.28), lineWidth: 1)
+				}
+				.shadow(color: .black.opacity(0.12), radius: 24, y: 12)
+		}
+	}
+}
+
+private extension View {
+	@ViewBuilder
+	func liquidGlassSurface(cornerRadius: CGFloat, interactive: Bool = false) -> some View {
+		if #available(iOS 26, *) {
+			if interactive {
+				glassEffect(.regular.interactive(), in: .rect(cornerRadius: cornerRadius))
+			} else {
+				glassEffect(.regular, in: .rect(cornerRadius: cornerRadius))
+			}
+		} else {
+			background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: cornerRadius))
+				.overlay {
+					RoundedRectangle(cornerRadius: cornerRadius)
+						.stroke(.white.opacity(0.25), lineWidth: 1)
+				}
+		}
 	}
 }
 
@@ -63,8 +135,6 @@ private struct MemeForgeView: View {
 
 			ScrollView {
 				VStack(alignment: .leading, spacing: 16) {
-					inputArea
-
 					if let requestError = model.requestError {
 						RequestErrorView(requestError: requestError)
 					}
@@ -80,6 +150,14 @@ private struct MemeForgeView: View {
 				.padding()
 			}
 			.scrollDismissesKeyboard(.interactively)
+			.safeAreaInset(edge: .bottom, spacing: 0) {
+				LiquidGlassPanel {
+					inputArea
+				}
+				.padding(.horizontal, 16)
+				.padding(.top, 10)
+				.padding(.bottom, 8)
+			}
 			.overlay(alignment: .bottom) {
 				if let statusMessage = model.statusMessage {
 					Text(statusMessage)
@@ -129,18 +207,15 @@ private struct MemeForgeView: View {
 
 	private var queryInputArea: some View {
 		VStack(alignment: .leading, spacing: 10) {
-			HStack(alignment: .top, spacing: 8) {
+			HStack(alignment: .center, spacing: 10) {
 				ZStack(alignment: .trailing) {
 					TextField(model.mode.placeholder, text: $model.query, axis: .vertical)
 						.lineLimit(1...5)
-						.padding(.leading, 10)
-						.padding(.trailing, model.query.isEmpty ? 10 : 38)
-						.padding(.vertical, 7)
-						.background {
-							RoundedRectangle(cornerRadius: 5)
-								.fill(Color(.systemBackground))
-								.stroke(Color(.separator).opacity(0.45), lineWidth: 1)
-						}
+						.font(.body)
+						.padding(.leading, 16)
+						.padding(.trailing, model.query.isEmpty ? 16 : 46)
+						.padding(.vertical, 15)
+						.frame(minHeight: 58, alignment: .center)
 						.textInputAutocapitalization(model.mode == .search ? .never : .sentences)
 						.autocorrectionDisabled(model.mode == .search)
 						.submitLabel(model.mode == .search ? .search : .done)
@@ -158,13 +233,14 @@ private struct MemeForgeView: View {
 							Image(systemName: "xmark.circle.fill")
 								.font(.body)
 								.foregroundStyle(.secondary)
-								.frame(width: 30, height: 30)
+								.frame(width: 36, height: 36)
 						}
 						.buttonStyle(.plain)
-						.padding(.trailing, 3)
+						.padding(.trailing, 6)
 						.accessibilityLabel("Clear")
 					}
 				}
+				.liquidGlassSurface(cornerRadius: 22, interactive: true)
 
 				if model.mode == .generate {
 					Button {
@@ -172,9 +248,11 @@ private struct MemeForgeView: View {
 						inputFocused = false
 					} label: {
 						Image(systemName: "photo.stack")
-							.frame(width: 22, height: 22)
+							.font(.title3.weight(.semibold))
+							.frame(width: 58, height: 58)
 					}
-					.buttonStyle(.bordered)
+					.buttonStyle(.plain)
+					.liquidGlassSurface(cornerRadius: 22, interactive: true)
 					.disabled(model.isLoading)
 					.accessibilityLabel("Choose generation assets")
 				}
@@ -187,26 +265,32 @@ private struct MemeForgeView: View {
 			HStack(spacing: 10) {
 				PhotosPicker(selection: $addPickerItems, maxSelectionCount: nil, matching: .images) {
 					Label("Add", systemImage: "plus")
+						.frame(height: 42)
+						.frame(maxWidth: .infinity)
 				}
-				.buttonStyle(.borderedProminent)
+				.buttonStyle(.plain)
+				.liquidGlassSurface(cornerRadius: 18, interactive: true)
 				.disabled(model.isLoading)
 
 				PhotosPicker(selection: $pickPickerItems, maxSelectionCount: nil, matching: .images) {
 					Label("Pick", systemImage: "photo")
+						.frame(height: 42)
+						.frame(maxWidth: .infinity)
 				}
-				.buttonStyle(.bordered)
+				.buttonStyle(.plain)
+				.liquidGlassSurface(cornerRadius: 18, interactive: true)
 				.disabled(model.isLoading)
-
-				Spacer()
 
 				Button {
 					model.showingAssetPicker = false
 					inputFocused = true
 				} label: {
 					Image(systemName: "keyboard")
-						.frame(width: 22, height: 22)
+						.font(.body.weight(.semibold))
+						.frame(width: 42, height: 42)
 				}
-				.buttonStyle(.bordered)
+				.buttonStyle(.plain)
+				.liquidGlassSurface(cornerRadius: 18, interactive: true)
 				.accessibilityLabel("Return to prompt")
 			}
 
