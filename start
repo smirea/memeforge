@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+simulator_name="${1:-iPhone 17}"
+root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+derived_data_path="$root_dir/.derivedData"
+app_path="$derived_data_path/Build/Products/Debug-iphonesimulator/Memeforge.app"
+bundle_id="com.stefan.memeforge"
+
+printf 'Building Memeforge for %s...\n' "$simulator_name"
+xcodebuild \
+	-project "$root_dir/Memeforge.xcodeproj" \
+	-scheme Memeforge \
+	-destination "platform=iOS Simulator,name=$simulator_name" \
+	-derivedDataPath "$derived_data_path" \
+	-quiet \
+	build
+
+printf 'Booting %s...\n' "$simulator_name"
+xcrun simctl boot "$simulator_name" >/dev/null 2>&1 || true
+xcrun simctl bootstatus "$simulator_name" -b
+open -a Simulator
+
+printf 'Installing Memeforge...\n'
+xcrun simctl terminate "$simulator_name" "$bundle_id" >/dev/null 2>&1 || true
+xcrun simctl install "$simulator_name" "$app_path"
+
+printf 'Launching Memeforge...\n'
+xcrun simctl launch "$simulator_name" "$bundle_id"

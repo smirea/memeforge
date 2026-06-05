@@ -35,6 +35,22 @@ General > Keyboard > Keyboards > Memeforge > Allow Full Access
 
 Full Access is required so the keyboard extension can call the GIPHY and Gemini APIs.
 
+## Run
+
+Start the simulator, build, install, and launch the app:
+
+```sh
+./start
+```
+
+Pass a simulator name to use a different device:
+
+```sh
+./start "iPhone 17 Pro"
+```
+
+Native iOS apps do not have React-style hot reload. After Swift or asset changes, rerun the script or build/run again from Xcode to rebuild, reinstall, and relaunch. SwiftUI previews are the closest fast feedback loop for isolated UI work, but they do not replace the running app in Simulator.
+
 ## Screenshots
 
 | Search: `disappear homer` | Generate: `doge eating onions in the "this is fine" meme template` |
