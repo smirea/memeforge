@@ -2,7 +2,8 @@
 set -euo pipefail
 
 simulator_name="${1:-iPhone 17}"
-root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+root_dir="$(cd "$script_dir/.." && pwd)"
 derived_data_path="$root_dir/.derivedData"
 app_path="$derived_data_path/Build/Products/Debug-iphonesimulator/Memeforge.app"
 bundle_id="com.stefan.memeforge"
