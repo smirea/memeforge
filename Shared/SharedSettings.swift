@@ -8,6 +8,8 @@ enum SharedSettings {
 	private static let copiedPreviewDataKey = "copiedMemePreviewData"
 	private static let copiedPreviewVersionKey = "copiedMemePreviewVersion"
 	private static let giphyMemeHistoryKey = "giphyMemeHistory"
+	private static let appShowsSettingsKey = "appShowsSettings"
+	private static let appMemeModeKey = "appMemeMode"
 
 	struct GiphyMemeHistoryItem: Codable, Equatable {
 		var title: String
@@ -34,6 +36,16 @@ enum SharedSettings {
 	static var keyboardHasFullAccess: Bool {
 		get { store.bool(forKey: keyboardFullAccessKey) }
 		set { store.set(newValue, forKey: keyboardFullAccessKey) }
+	}
+
+	static var appShowsSettings: Bool {
+		get { store.object(forKey: appShowsSettingsKey) as? Bool ?? false }
+		set { store.set(newValue, forKey: appShowsSettingsKey) }
+	}
+
+	static var appMemeMode: String {
+		get { store.string(forKey: appMemeModeKey) ?? "search" }
+		set { store.set(newValue, forKey: appMemeModeKey) }
 	}
 
 	static var copiedMemePreviewData: Data? {
