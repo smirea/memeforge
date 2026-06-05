@@ -38,8 +38,11 @@ value_for() {
 
 			sub(pattern, "", line)
 			value = trim(line)
-			if (value ~ /^".*"$/ || value ~ /^\047.*\047$/) {
-				value = substr(value, 2, length(value) - 2)
+			quote = substr(value, 1, 1)
+			if (quote == sprintf("%c", 34) || quote == sprintf("%c", 39)) {
+				value = substr(value, 2)
+				end = index(value, quote)
+				if (end > 0) value = substr(value, 1, end - 1)
 			} else {
 				sub(/[[:space:]]+#.*$/, "", value)
 				value = trim(value)
