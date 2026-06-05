@@ -4,6 +4,7 @@ import PhotosUI
 import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
+import VisionKit
 
 struct ContentView: View {
 	@State private var model = MemeForgeModel()
@@ -102,6 +103,7 @@ private struct MemeForgeView: View {
 	@Bindable var model: MemeForgeModel
 	@State private var addPickerItems: [PhotosPickerItem] = []
 	@State private var pickPickerItems: [PhotosPickerItem] = []
+	@State private var fullScreenPreview: FullScreenPreviewItem?
 	@FocusState private var inputFocused: Bool
 
 	var body: some View {
@@ -110,7 +112,7 @@ private struct MemeForgeView: View {
 				VStack(alignment: .leading, spacing: 16) {
 					if model.mode == .generate, model.showingAssetPicker, !model.generationAssetCollection.isEmpty {
 						GenerationAssetCollectionGrid(items: model.generationAssetCollection) { item in
-							model.insertGenerationAsset(item)
+							openGenerationAsset(item)
 						}
 					}
 
@@ -123,7 +125,9 @@ private struct MemeForgeView: View {
 					}
 
 					if !model.results.isEmpty {
-						MemeResultsGrid(model: model)
+						MemeResultsGrid(model: model) { result in
+							fullScreenPreview = .result(result)
+						}
 					}
 				}
 				.padding(.horizontal, contentHorizontalPadding)
@@ -158,6 +162,11 @@ private struct MemeForgeView: View {
 			model.refreshHistoryIfNeeded()
 			model.refreshGenerationAssetCollection()
 		}
+		.fullScreenCover(item: $fullScreenPreview) { item in
+			FullScreenImagePreview(item: item) {
+				copyPreviewItem(item)
+			}
+		}
 	}
 
 	private var contentHorizontalPadding: CGFloat {
@@ -190,9 +199,15 @@ private struct MemeForgeView: View {
 			} else {
 				queryInputArea
 				if model.mode == .generate, !model.selectedGenerationAssets.isEmpty {
-					SelectedGenerationAssetsStrip(assets: model.selectedGenerationAssets) { asset in
-						model.removeGenerationAsset(asset)
-					}
+					SelectedGenerationAssetsStrip(
+						assets: model.selectedGenerationAssets,
+						open: { asset in
+							fullScreenPreview = .selectedAsset(asset)
+						},
+						remove: { asset in
+							model.removeGenerationAsset(asset)
+						}
+					)
 				}
 			}
 		}
@@ -264,9 +279,15 @@ private struct MemeForgeView: View {
 	private var generationAssetPickerArea: some View {
 		VStack(alignment: .leading, spacing: 10) {
 			if !model.selectedGenerationAssets.isEmpty {
-				SelectedGenerationAssetsStrip(assets: model.selectedGenerationAssets) { asset in
-					model.removeGenerationAsset(asset)
-				}
+				SelectedGenerationAssetsStrip(
+					assets: model.selectedGenerationAssets,
+					open: { asset in
+						fullScreenPreview = .selectedAsset(asset)
+					},
+					remove: { asset in
+						model.removeGenerationAsset(asset)
+					}
+				)
 			}
 
 			HStack(spacing: 10) {
@@ -322,6 +343,24 @@ private struct MemeForgeView: View {
 		}
 	}
 
+	private func openGenerationAsset(_ item: SharedSettings.GenerationAssetItem) {
+		guard let data = SharedSettings.generationAssetData(for: item) else { return }
+		fullScreenPreview = .asset(
+			id: item.id,
+			title: "Saved generation asset",
+			imageData: data,
+			pasteboardType: UTType(mimeType: item.mimeType)?.identifier ?? item.mimeType
+		)
+	}
+
+	private func copyPreviewItem(_ item: FullScreenPreviewItem) {
+		switch item {
+		case .result(let result):
+			model.copy(result)
+		case .asset(_, _, let imageData, let pasteboardType):
+			model.copyImageData(imageData, pasteboardType: pasteboardType)
+		}
+	}
 }
 
 private struct ModeTabs: View {
@@ -340,6 +379,7 @@ private struct ModeTabs: View {
 
 private struct MemeResultsGrid: View {
 	@Bindable var model: MemeForgeModel
+	let open: (MemeResult) -> Void
 
 	private var columns: [GridItem] {
 		resultGridColumns(for: model.mode)
@@ -349,7 +389,7 @@ private struct MemeResultsGrid: View {
 		LazyVGrid(columns: columns, spacing: 0) {
 			ForEach(model.results) { result in
 				MemeResultCell(result: result, copied: model.copiedResultID == result.id) {
-					model.copy(result)
+					open(result)
 				}
 				.onAppear {
 					model.loadMoreSearchResultsIfNeeded(appearingResultID: result.id)
@@ -398,6 +438,7 @@ private func resultGridColumns(for mode: MemeMode) -> [GridItem] {
 
 private struct SelectedGenerationAssetsStrip: View {
 	let assets: [SelectedGenerationAsset]
+	let open: (SelectedGenerationAsset) -> Void
 	let remove: (SelectedGenerationAsset) -> Void
 
 	var body: some View {
@@ -405,6 +446,8 @@ private struct SelectedGenerationAssetsStrip: View {
 			HStack(spacing: 8) {
 				ForEach(assets) { asset in
 					SelectedGenerationAssetThumbnail(asset: asset) {
+						open(asset)
+					} remove: {
 						remove(asset)
 					}
 				}
@@ -417,25 +460,30 @@ private struct SelectedGenerationAssetsStrip: View {
 
 private struct SelectedGenerationAssetThumbnail: View {
 	let asset: SelectedGenerationAsset
+	let open: () -> Void
 	let remove: () -> Void
 
 	var body: some View {
 		ZStack(alignment: .topTrailing) {
-			Group {
-				if let image = UIImage(data: asset.imageData) {
-					Image(uiImage: image)
-						.resizable()
-						.scaledToFill()
-				} else {
-					Image(systemName: "photo")
-						.font(.title2)
-						.foregroundStyle(.secondary)
-						.frame(maxWidth: .infinity, maxHeight: .infinity)
+			Button(action: open) {
+				Group {
+					if let image = UIImage(data: asset.imageData) {
+						Image(uiImage: image)
+							.resizable()
+							.scaledToFill()
+					} else {
+						Image(systemName: "photo")
+							.font(.title2)
+							.foregroundStyle(.secondary)
+							.frame(maxWidth: .infinity, maxHeight: .infinity)
+					}
 				}
+				.frame(width: 64, height: 64)
+				.clipShape(RoundedRectangle(cornerRadius: 8))
+				.liquidGlassSurface(cornerRadius: 12, interactive: true)
 			}
-			.frame(width: 64, height: 64)
-			.clipShape(RoundedRectangle(cornerRadius: 8))
-			.liquidGlassSurface(cornerRadius: 12)
+			.buttonStyle(.plain)
+			.accessibilityLabel("Selected generation asset")
 
 			Button(action: remove) {
 				Image(systemName: "xmark")
@@ -512,10 +560,10 @@ private struct GenerationAssetCollectionCell: View {
 private struct MemeResultCell: View {
 	let result: MemeResult
 	let copied: Bool
-	let copy: () -> Void
+	let open: () -> Void
 
 	var body: some View {
-		Button(action: copy) {
+		Button(action: open) {
 			ZStack(alignment: .topTrailing) {
 				SquareThumbnailTile {
 					MemePreview(result: result)
@@ -542,7 +590,264 @@ private struct MemeResultCell: View {
 		}
 		.buttonStyle(.plain)
 		.accessibilityLabel(result.title.isEmpty ? "Meme" : result.title)
-		.accessibilityHint("Copies this meme")
+		.accessibilityHint("Opens this meme")
+	}
+}
+
+private enum FullScreenPreviewItem: Identifiable {
+	case result(MemeResult)
+	case asset(id: UUID, title: String, imageData: Data, pasteboardType: String)
+
+	var id: String {
+		switch self {
+		case .result(let result):
+			"result-\(result.id.uuidString)"
+		case .asset(let id, _, _, _):
+			"asset-\(id.uuidString)"
+		}
+	}
+
+	var title: String {
+		switch self {
+		case .result(let result):
+			result.title.isEmpty ? "Meme" : result.title
+		case .asset(_, let title, _, _):
+			title
+		}
+	}
+
+	var imageData: Data? {
+		switch self {
+		case .result(let result):
+			result.imageData
+		case .asset(_, _, let imageData, _):
+			imageData
+		}
+	}
+
+	var imageURL: URL? {
+		switch self {
+		case .result(let result):
+			result.previewURL ?? result.copyURL
+		case .asset:
+			nil
+		}
+	}
+
+	static func selectedAsset(_ asset: SelectedGenerationAsset) -> FullScreenPreviewItem {
+		.asset(
+			id: asset.id,
+			title: "Selected generation asset",
+			imageData: asset.imageData,
+			pasteboardType: UTType(mimeType: asset.mimeType)?.identifier ?? asset.mimeType
+		)
+	}
+}
+
+private struct FullScreenImagePreview: View {
+	@Environment(\.dismiss) private var dismiss
+	@State private var copied = false
+
+	let item: FullScreenPreviewItem
+	let copy: () -> Void
+
+	var body: some View {
+		ZStack {
+			Color.black
+				.ignoresSafeArea()
+
+			NativePhotoPreview(item: item)
+				.ignoresSafeArea()
+				.accessibilityLabel(item.title)
+		}
+		.safeAreaInset(edge: .bottom, spacing: 0) {
+			controls
+				.padding(.horizontal, 24)
+				.padding(.bottom, 12)
+		}
+		.statusBarHidden()
+	}
+
+	private var controls: some View {
+		Group {
+			if #available(iOS 26, *) {
+				GlassEffectContainer(spacing: 16) {
+					controlRow
+				}
+			} else {
+				controlRow
+			}
+		}
+	}
+
+	private var controlRow: some View {
+		HStack {
+			controlButton(systemName: "xmark", accessibilityLabel: "Close") {
+				dismiss()
+			}
+
+			Spacer()
+
+			controlButton(systemName: copied ? "checkmark" : "doc.on.doc.fill", accessibilityLabel: "Copy") {
+				copy()
+				copied = true
+				Task {
+					try? await Task.sleep(nanoseconds: 1_100_000_000)
+					await MainActor.run {
+						copied = false
+					}
+				}
+			}
+		}
+	}
+
+	private func controlButton(systemName: String, accessibilityLabel: String, action: @escaping () -> Void) -> some View {
+		Button(action: action) {
+			Image(systemName: systemName)
+				.font(.title3.weight(.bold))
+				.foregroundStyle(.white)
+				.frame(width: 56, height: 56)
+		}
+		.buttonStyle(.plain)
+		.liquidGlassSurface(cornerRadius: 28, interactive: true)
+		.accessibilityLabel(accessibilityLabel)
+	}
+}
+
+private struct NativePhotoPreview: UIViewRepresentable {
+	let item: FullScreenPreviewItem
+
+	func makeUIView(context: Context) -> NativePhotoPreviewUIView {
+		NativePhotoPreviewUIView()
+	}
+
+	func updateUIView(_ uiView: NativePhotoPreviewUIView, context: Context) {
+		uiView.configure(id: item.id, imageData: item.imageData, imageURL: item.imageURL)
+	}
+
+	static func dismantleUIView(_ uiView: NativePhotoPreviewUIView, coordinator: ()) {
+		uiView.reset()
+	}
+}
+
+private final class NativePhotoPreviewUIView: UIView {
+	private let imageView = UIImageView()
+	private var representedID: String?
+	private var loadTask: URLSessionDataTask?
+	private var analysisTask: Task<Void, Never>?
+	private var imageAnalysisInteraction: ImageAnalysisInteraction?
+
+	override init(frame: CGRect) {
+		super.init(frame: frame)
+		backgroundColor = .black
+		imageView.backgroundColor = .black
+		imageView.contentMode = .scaleAspectFit
+		imageView.tintColor = .secondaryLabel
+		imageView.isUserInteractionEnabled = true
+		imageView.translatesAutoresizingMaskIntoConstraints = false
+		addSubview(imageView)
+		NSLayoutConstraint.activate([
+			imageView.leadingAnchor.constraint(equalTo: leadingAnchor),
+			imageView.trailingAnchor.constraint(equalTo: trailingAnchor),
+			imageView.topAnchor.constraint(equalTo: topAnchor),
+			imageView.bottomAnchor.constraint(equalTo: bottomAnchor),
+		])
+	}
+
+	@available(*, unavailable)
+	required init?(coder: NSCoder) {
+		fatalError("init(coder:) has not been implemented")
+	}
+
+	func configure(id: String, imageData: Data?, imageURL: URL?) {
+		guard representedID != id else { return }
+		reset()
+		representedID = id
+
+		if let imageData {
+			setImageData(imageData, id: id)
+			return
+		}
+
+		guard let imageURL else {
+			imageView.image = UIImage(systemName: "photo")
+			return
+		}
+
+		let task = URLSession.shared.dataTask(with: imageURL) { [weak self] data, _, _ in
+			guard let self, let data else { return }
+			DispatchQueue.main.async {
+				guard self.representedID == id else { return }
+				self.setImageData(data, id: id)
+			}
+		}
+		loadTask = task
+		task.resume()
+	}
+
+	func reset() {
+		loadTask?.cancel()
+		loadTask = nil
+		analysisTask?.cancel()
+		analysisTask = nil
+		if let imageAnalysisInteraction {
+			imageView.removeInteraction(imageAnalysisInteraction)
+			self.imageAnalysisInteraction = nil
+		}
+		representedID = nil
+		imageView.image = nil
+	}
+
+	private func setImageData(_ data: Data, id: String) {
+		let displayImage = UIImage.animatedGIF(data: data) ?? UIImage(data: data)
+		guard let displayImage else {
+			imageView.image = UIImage(systemName: "photo")
+			return
+		}
+		imageView.image = displayImage
+		imageView.startAnimating()
+		prepareImageAnalysis(for: UIImage(data: data) ?? displayImage, id: id)
+	}
+
+	private func prepareImageAnalysis(for image: UIImage, id: String) {
+		guard ImageAnalyzer.isSupported else { return }
+
+		let interaction = ImageAnalysisInteraction(self)
+		interaction.preferredInteractionTypes = [.imageSubject, .visualLookUp, .textSelection, .dataDetectors]
+		imageView.addInteraction(interaction)
+		imageAnalysisInteraction = interaction
+
+		let analyzer = ImageAnalyzer()
+		analysisTask = Task { [weak self] in
+			let configuration = ImageAnalyzer.Configuration([.visualLookUp, .text, .machineReadableCode])
+			guard let analysis = try? await analyzer.analyze(image, configuration: configuration) else { return }
+			await MainActor.run {
+				guard self?.representedID == id else { return }
+				interaction.analysis = analysis
+			}
+		}
+	}
+
+	private func imageContentRect() -> CGRect {
+		guard let image = imageView.image, image.size.width > 0, image.size.height > 0 else {
+			return imageView.bounds
+		}
+		return AVMakeRect(aspectRatio: image.size, insideRect: imageView.bounds)
+	}
+}
+
+extension NativePhotoPreviewUIView: ImageAnalysisInteractionDelegate {
+	func contentsRect(for interaction: ImageAnalysisInteraction) -> CGRect {
+		imageContentRect()
+	}
+
+	func contentView(for interaction: ImageAnalysisInteraction) -> UIView? {
+		imageView
+	}
+
+	func presentingViewController(for interaction: ImageAnalysisInteraction) -> UIViewController? {
+		sequence(first: self as UIResponder?, next: { $0?.next })
+			.first { $0 is UIViewController } as? UIViewController
 	}
 }
 
@@ -963,6 +1268,13 @@ private final class MemeForgeModel {
 		copyTask = Task { [weak self] in
 			await self?.copyResult(result)
 		}
+	}
+
+	func copyImageData(_ data: Data, pasteboardType: String) {
+		let payload = Self.normalizedCopyPayload(data: data, pasteboardType: pasteboardType)
+		UIPasteboard.general.setData(payload.data, forPasteboardType: payload.pasteboardType)
+		SharedSettings.updateCopiedMemePreview(payload.data)
+		showStatus("Copied")
 	}
 
 	private func resetResults() {
