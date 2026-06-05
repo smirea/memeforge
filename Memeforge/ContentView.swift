@@ -455,7 +455,7 @@ private struct GenerationAssetCollectionGrid: View {
 	let items: [SharedSettings.GenerationAssetItem]
 	let select: (SharedSettings.GenerationAssetItem) -> Void
 
-	private let columns = Array(repeating: GridItem(.flexible(), spacing: 0), count: 3)
+	private let columns = Array(repeating: GridItem(.flexible(), spacing: 0), count: 2)
 
 	var body: some View {
 		LazyVGrid(columns: columns, spacing: 0) {

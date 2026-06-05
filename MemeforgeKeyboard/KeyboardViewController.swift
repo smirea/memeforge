@@ -1915,7 +1915,7 @@ extension KeyboardViewController: UICollectionViewDataSource, UICollectionViewDe
 		let layout = collectionViewLayout as? UICollectionViewFlowLayout
 		let inset = layout?.sectionInset ?? .zero
 		let spacing = layout?.minimumInteritemSpacing ?? 0
-		let columns: CGFloat = assetPickerVisible ? 3 : (mode == .generate ? 2 : 3)
+		let columns: CGFloat = assetPickerVisible ? 2 : (mode == .generate ? 2 : 3)
 		let availableWidth = collectionView.bounds.width - inset.left - inset.right - spacing * (columns - 1)
 		let side = floor(availableWidth / columns)
 		return CGSize(width: side, height: side)
