@@ -10,7 +10,7 @@
 
 `Config/LocalSecrets.xcconfig` is required. Xcode will fail before building if it is missing, and the build also fails if either resolved key is blank.
 
-Generate it from `.env.local`:
+Generate it from `.env.local` or exported environment variables:
 
 ```sh
 ./Scripts/sync-local-secrets.sh
@@ -23,6 +23,8 @@ GIPHY_API_KEY=your-giphy-api-key
 GEMINI_API_KEY=your-gemini-api-key
 ```
 
+For Xcode Cloud, add `GIPHY_API_KEY` and `GEMINI_API_KEY` as workflow environment variables or secrets. The committed `ci_scripts/ci_post_clone.sh` script writes `Config/LocalSecrets.xcconfig` before Xcode Cloud starts `xcodebuild`.
+
 The generated `Config/LocalSecrets.xcconfig` should look like this:
 
 ```xcconfig
@@ -30,7 +32,7 @@ GIPHY_API_KEY = your-giphy-api-key
 GEMINI_API_KEY = your-gemini-api-key
 ```
 
-`Config/LocalSecrets.xcconfig` is ignored by git. Xcode cannot generate it automatically once the required `.xcconfig` include is missing, because build settings are resolved before build phases run.
+`Config/LocalSecrets.xcconfig` is ignored by git. Normal Xcode build phases cannot generate it once the required `.xcconfig` include is missing, because build settings are resolved before build phases run.
 
 Open `Memeforge.xcodeproj`, build the `Memeforge` scheme, then enable the keyboard in iOS Settings:
 

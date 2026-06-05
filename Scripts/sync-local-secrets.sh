@@ -1,15 +1,26 @@
 #!/bin/sh
 set -eu
 
-cd "$(dirname "$0")/.."
-
-if [ ! -f .env.local ]; then
-	echo "Missing .env.local. Run env-manager down if this project is synced, or create .env.local with GIPHY_API_KEY and GEMINI_API_KEY." >&2
-	exit 1
-fi
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+cd "$script_dir/.."
 
 value_for() {
 	key=$1
+	env_value=""
+	case "$key" in
+		GIPHY_API_KEY) env_value=${GIPHY_API_KEY:-} ;;
+		GEMINI_API_KEY) env_value=${GEMINI_API_KEY:-} ;;
+	esac
+
+	if [ -n "$(printf '%s' "$env_value" | tr -d '[:space:]')" ]; then
+		printf '%s\n' "$env_value"
+		return
+	fi
+
+	if [ ! -f .env.local ]; then
+		return
+	fi
+
 	awk -v key="$key" '
 		function trim(value) {
 			sub(/^[[:space:]]+/, "", value)
@@ -46,7 +57,7 @@ giphy_api_key=$(value_for GIPHY_API_KEY)
 gemini_api_key=$(value_for GEMINI_API_KEY)
 
 if [ -z "$giphy_api_key" ] || [ -z "$gemini_api_key" ]; then
-	echo ".env.local must define non-empty GIPHY_API_KEY and GEMINI_API_KEY." >&2
+	echo "Missing secrets. Set GIPHY_API_KEY and GEMINI_API_KEY in the environment, or create .env.local with non-empty values." >&2
 	exit 1
 fi
 
