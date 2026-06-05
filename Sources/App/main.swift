@@ -1,6 +1,6 @@
 @main
 struct App {
 	static func main() {
-		print("Hello, ios-keyboard!")
+		print("Hello, memeforge!")
 	}
 }

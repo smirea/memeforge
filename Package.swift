@@ -2,13 +2,13 @@
 import PackageDescription
 
 let package = Package(
-	name: "ios-keyboard",
+	name: "memeforge",
 	platforms: [
 		.iOS(.v17),
 		.macOS(.v14),
 	],
 	products: [
-		.executable(name: "ios-keyboard", targets: ["App"]),
+		.executable(name: "memeforge", targets: ["App"]),
 	],
 	targets: [
 		.executableTarget(name: "App"),
