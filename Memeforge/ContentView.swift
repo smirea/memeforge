@@ -70,11 +70,7 @@ private struct MemeForgeView: View {
 					}
 
 					if model.isLoading, model.results.isEmpty {
-						loadingView
-					}
-
-					if model.results.isEmpty, !model.isLoading, model.requestError == nil {
-						EmptyResultsView(mode: model.mode, showingHistory: model.showingHistory)
+						LoadingTilesGrid(mode: model.mode)
 					}
 
 					if !model.results.isEmpty {
@@ -134,17 +130,41 @@ private struct MemeForgeView: View {
 	private var queryInputArea: some View {
 		VStack(alignment: .leading, spacing: 10) {
 			HStack(alignment: .top, spacing: 8) {
-				TextField(model.mode.placeholder, text: $model.query, axis: .vertical)
-					.lineLimit(1...5)
-					.textFieldStyle(.roundedBorder)
-					.textInputAutocapitalization(model.mode == .search ? .never : .sentences)
-					.autocorrectionDisabled(model.mode == .search)
-					.submitLabel(model.mode == .search ? .search : .done)
-					.focused($inputFocused)
-					.onSubmit {
-						model.submit()
-						inputFocused = false
+				ZStack(alignment: .trailing) {
+					TextField(model.mode.placeholder, text: $model.query, axis: .vertical)
+						.lineLimit(1...5)
+						.padding(.leading, 10)
+						.padding(.trailing, model.query.isEmpty ? 10 : 38)
+						.padding(.vertical, 7)
+						.background {
+							RoundedRectangle(cornerRadius: 5)
+								.fill(Color(.systemBackground))
+								.stroke(Color(.separator).opacity(0.45), lineWidth: 1)
+						}
+						.textInputAutocapitalization(model.mode == .search ? .never : .sentences)
+						.autocorrectionDisabled(model.mode == .search)
+						.submitLabel(model.mode == .search ? .search : .done)
+						.focused($inputFocused)
+						.onSubmit {
+							model.submit()
+							inputFocused = false
+						}
+
+					if !model.query.isEmpty {
+						Button {
+							model.clearQuery()
+							inputFocused = true
+						} label: {
+							Image(systemName: "xmark.circle.fill")
+								.font(.body)
+								.foregroundStyle(.secondary)
+								.frame(width: 30, height: 30)
+						}
+						.buttonStyle(.plain)
+						.padding(.trailing, 3)
+						.accessibilityLabel("Clear")
 					}
+				}
 
 				if model.mode == .generate {
 					Button {
@@ -157,27 +177,6 @@ private struct MemeForgeView: View {
 					.buttonStyle(.bordered)
 					.disabled(model.isLoading)
 					.accessibilityLabel("Choose generation assets")
-				}
-			}
-
-			HStack(spacing: 10) {
-				Button {
-					model.submit()
-					inputFocused = false
-				} label: {
-					Label(model.mode.actionTitle, systemImage: model.mode.actionSymbol)
-				}
-				.buttonStyle(.borderedProminent)
-				.disabled(model.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.isLoading)
-
-				if !model.query.isEmpty {
-					Button {
-						model.clearQuery()
-						inputFocused = true
-					} label: {
-						Label("Clear", systemImage: "xmark.circle")
-					}
-					.buttonStyle(.bordered)
 				}
 			}
 		}
@@ -244,22 +243,13 @@ private struct MemeForgeView: View {
 		}
 	}
 
-	private var loadingView: some View {
-		HStack(spacing: 10) {
-			ProgressView()
-			Text(model.mode.loadingTitle)
-				.foregroundStyle(.secondary)
-		}
-		.frame(maxWidth: .infinity, minHeight: 96)
-	}
 }
 
 private struct MemeResultsGrid: View {
 	@Bindable var model: MemeForgeModel
 
 	private var columns: [GridItem] {
-		let minimum: CGFloat = model.mode == .generate ? 156 : 106
-		return [GridItem(.adaptive(minimum: minimum), spacing: 8)]
+		resultGridColumns(for: model.mode)
 	}
 
 	var body: some View {
@@ -281,6 +271,37 @@ private struct MemeResultsGrid: View {
 			}
 		}
 	}
+}
+
+private struct LoadingTilesGrid: View {
+	let mode: MemeMode
+
+	private var columns: [GridItem] {
+		resultGridColumns(for: mode)
+	}
+
+	private var tileCount: Int {
+		mode == .generate ? 2 : 6
+	}
+
+	var body: some View {
+		LazyVGrid(columns: columns, spacing: 8) {
+			ForEach(0..<tileCount, id: \.self) { _ in
+				ZStack {
+					Color(.secondarySystemBackground)
+					ProgressView()
+						.controlSize(.small)
+				}
+				.aspectRatio(1, contentMode: .fit)
+				.clipShape(RoundedRectangle(cornerRadius: 8))
+			}
+		}
+	}
+}
+
+private func resultGridColumns(for mode: MemeMode) -> [GridItem] {
+	let minimum: CGFloat = mode == .generate ? 156 : 106
+	return [GridItem(.adaptive(minimum: minimum), spacing: 8)]
 }
 
 private struct SelectedGenerationAssetsStrip: View {
@@ -408,8 +429,8 @@ private struct MemeResultCell: View {
 		Button(action: copy) {
 			ZStack(alignment: .topTrailing) {
 				MemePreview(result: result)
-					.aspectRatio(1, contentMode: .fill)
 					.frame(maxWidth: .infinity)
+					.aspectRatio(1, contentMode: .fit)
 					.clipShape(RoundedRectangle(cornerRadius: 8))
 					.background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
 
@@ -442,34 +463,40 @@ private struct MemePreview: View {
 	let result: MemeResult
 
 	var body: some View {
-		ZStack {
-			Color(.secondarySystemBackground)
+		GeometryReader { proxy in
+			ZStack {
+				Color(.secondarySystemBackground)
 
-			if let imageData = result.imageData, let image = UIImage.animatedGIF(data: imageData) ?? UIImage(data: imageData) {
-				Image(uiImage: image)
-					.resizable()
-					.scaledToFill()
-			} else if let url = result.previewURL {
-				AsyncImage(url: url) { phase in
-					switch phase {
-					case .empty:
-						ProgressView()
-					case .success(let image):
-						image
-							.resizable()
-							.scaledToFill()
-					case .failure:
-						Image(systemName: "photo")
-							.font(.title2)
-							.foregroundStyle(.secondary)
-					@unknown default:
-						EmptyView()
+				if let imageData = result.imageData, let image = UIImage.animatedGIF(data: imageData) ?? UIImage(data: imageData) {
+					Image(uiImage: image)
+						.resizable()
+						.scaledToFill()
+						.frame(width: proxy.size.width, height: proxy.size.height)
+						.clipped()
+				} else if let url = result.previewURL {
+					AsyncImage(url: url) { phase in
+						switch phase {
+						case .empty:
+							ProgressView()
+						case .success(let image):
+							image
+								.resizable()
+								.scaledToFill()
+								.frame(width: proxy.size.width, height: proxy.size.height)
+								.clipped()
+						case .failure:
+							Image(systemName: "photo")
+								.font(.title2)
+								.foregroundStyle(.secondary)
+						@unknown default:
+							EmptyView()
+						}
 					}
+				} else {
+					Image(systemName: "photo")
+						.font(.title2)
+						.foregroundStyle(.secondary)
 				}
-			} else {
-				Image(systemName: "photo")
-					.font(.title2)
-					.foregroundStyle(.secondary)
 			}
 		}
 	}
@@ -492,20 +519,6 @@ private struct RequestErrorView: View {
 		.frame(maxWidth: .infinity, alignment: .leading)
 		.padding(12)
 		.background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
-	}
-}
-
-private struct EmptyResultsView: View {
-	let mode: MemeMode
-	let showingHistory: Bool
-
-	var body: some View {
-		ContentUnavailableView(
-			showingHistory ? "No recent memes" : mode.emptyTitle,
-			systemImage: mode.emptySymbol,
-			description: Text(showingHistory ? "Copied memes will appear here." : mode.emptyDetail)
-		)
-		.frame(maxWidth: .infinity, minHeight: 220)
 	}
 }
 
@@ -1159,60 +1172,6 @@ private enum MemeMode: String, CaseIterable, Identifiable, Sendable {
 			"type a meme search"
 		case .generate:
 			"describe a static meme"
-		}
-	}
-
-	var actionTitle: String {
-		switch self {
-		case .search:
-			"Search"
-		case .generate:
-			"Generate"
-		}
-	}
-
-	var actionSymbol: String {
-		switch self {
-		case .search:
-			"magnifyingglass"
-		case .generate:
-			"sparkles"
-		}
-	}
-
-	var loadingTitle: String {
-		switch self {
-		case .search:
-			"Searching"
-		case .generate:
-			"Generating"
-		}
-	}
-
-	var emptyTitle: String {
-		switch self {
-		case .search:
-			"No memes"
-		case .generate:
-			"No generated memes"
-		}
-	}
-
-	var emptyDetail: String {
-		switch self {
-		case .search:
-			"Recent copies appear when the search box is empty."
-		case .generate:
-			"Generated images appear here."
-		}
-	}
-
-	var emptySymbol: String {
-		switch self {
-		case .search:
-			"magnifyingglass"
-		case .generate:
-			"sparkles"
 		}
 	}
 }
