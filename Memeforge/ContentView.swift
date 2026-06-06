@@ -110,10 +110,16 @@ private struct MemeForgeView: View {
 		VStack(spacing: 0) {
 			ScrollView {
 				VStack(alignment: .leading, spacing: 16) {
-					if model.mode == .generate, model.showingAssetPicker, !model.generationAssetCollection.isEmpty {
-						GenerationAssetCollectionGrid(items: model.generationAssetCollection) { item in
-							openGenerationAsset(item)
-						}
+					if model.mode == .generate, !model.generationAssetCollection.isEmpty {
+						GenerationAssetCollectionGrid(
+							items: model.generationAssetCollection,
+							select: { item in
+								model.insertGenerationAsset(item)
+							},
+							preview: { item in
+								openGenerationAsset(item)
+							}
+						)
 					}
 
 					if let requestError = model.requestError {
@@ -195,21 +201,17 @@ private struct MemeForgeView: View {
 
 	private var inputArea: some View {
 		VStack(alignment: .leading, spacing: 10) {
-			if model.mode == .generate && model.showingAssetPicker {
-				generationAssetPickerArea
-			} else {
-				queryInputArea
-				if model.mode == .generate, !model.selectedGenerationAssets.isEmpty {
-					SelectedGenerationAssetsStrip(
-						assets: model.selectedGenerationAssets,
-						open: { asset in
-							fullScreenPreview = .selectedAsset(asset)
-						},
-						remove: { asset in
-							model.removeGenerationAsset(asset)
-						}
-					)
-				}
+			queryInputArea
+			if model.mode == .generate, !model.selectedGenerationAssets.isEmpty {
+				SelectedGenerationAssetsStrip(
+					assets: model.selectedGenerationAssets,
+					open: { asset in
+						fullScreenPreview = .selectedAsset(asset)
+					},
+					remove: { asset in
+						model.removeGenerationAsset(asset)
+					}
+				)
 			}
 		}
 		.onChange(of: addPickerItems) { _, items in
@@ -260,10 +262,7 @@ private struct MemeForgeView: View {
 				.liquidGlassSurface(cornerRadius: 22, interactive: true)
 
 				if model.mode == .generate {
-					Button {
-						model.showingAssetPicker = true
-						inputFocused = false
-					} label: {
+					PhotosPicker(selection: $addPickerItems, maxSelectionCount: nil, matching: .images) {
 						Image(systemName: "photo.stack")
 							.font(.title3.weight(.semibold))
 							.frame(width: 58, height: 58)
@@ -271,56 +270,18 @@ private struct MemeForgeView: View {
 					.buttonStyle(.plain)
 					.liquidGlassSurface(cornerRadius: 22, interactive: true)
 					.disabled(model.isLoading)
-					.accessibilityLabel("Choose generation assets")
-				}
-			}
-		}
-	}
+					.accessibilityLabel("Add generation assets")
 
-	private var generationAssetPickerArea: some View {
-		VStack(alignment: .leading, spacing: 10) {
-			if !model.selectedGenerationAssets.isEmpty {
-				SelectedGenerationAssetsStrip(
-					assets: model.selectedGenerationAssets,
-					open: { asset in
-						fullScreenPreview = .selectedAsset(asset)
-					},
-					remove: { asset in
-						model.removeGenerationAsset(asset)
+					PhotosPicker(selection: $pickPickerItems, maxSelectionCount: nil, matching: .images) {
+						Image(systemName: "photo")
+							.font(.title3.weight(.semibold))
+							.frame(width: 58, height: 58)
 					}
-				)
-			}
-
-			HStack(spacing: 10) {
-				PhotosPicker(selection: $addPickerItems, maxSelectionCount: nil, matching: .images) {
-					Label("Add", systemImage: "plus")
-						.frame(height: 42)
-						.frame(maxWidth: .infinity)
+					.buttonStyle(.plain)
+					.liquidGlassSurface(cornerRadius: 22, interactive: true)
+					.disabled(model.isLoading)
+					.accessibilityLabel("Pick generation assets for this prompt")
 				}
-				.buttonStyle(.plain)
-				.liquidGlassSurface(cornerRadius: 18, interactive: true)
-				.disabled(model.isLoading)
-
-				PhotosPicker(selection: $pickPickerItems, maxSelectionCount: nil, matching: .images) {
-					Label("Pick", systemImage: "photo")
-						.frame(height: 42)
-						.frame(maxWidth: .infinity)
-				}
-				.buttonStyle(.plain)
-				.liquidGlassSurface(cornerRadius: 18, interactive: true)
-				.disabled(model.isLoading)
-
-				Button {
-					model.showingAssetPicker = false
-					inputFocused = true
-				} label: {
-					Image(systemName: "keyboard")
-						.font(.body.weight(.semibold))
-						.frame(width: 42, height: 42)
-				}
-				.buttonStyle(.plain)
-				.liquidGlassSurface(cornerRadius: 18, interactive: true)
-				.accessibilityLabel("Return to prompt")
 			}
 		}
 	}
@@ -507,6 +468,7 @@ private struct SelectedGenerationAssetThumbnail: View {
 private struct GenerationAssetCollectionGrid: View {
 	let items: [SharedSettings.GenerationAssetItem]
 	let select: (SharedSettings.GenerationAssetItem) -> Void
+	let preview: (SharedSettings.GenerationAssetItem) -> Void
 
 	private let columns = Array(repeating: GridItem(.flexible(), spacing: 0), count: 2)
 
@@ -515,6 +477,8 @@ private struct GenerationAssetCollectionGrid: View {
 			ForEach(items) { item in
 				GenerationAssetCollectionCell(item: item) {
 					select(item)
+				} preview: {
+					preview(item)
 				}
 			}
 		}
@@ -524,41 +488,42 @@ private struct GenerationAssetCollectionGrid: View {
 private struct GenerationAssetCollectionCell: View {
 	let item: SharedSettings.GenerationAssetItem
 	let select: () -> Void
+	let preview: () -> Void
 
 	@State private var image: UIImage?
 
 	var body: some View {
-		Button(action: select) {
-			ZStack(alignment: .topTrailing) {
-				SquareThumbnailTile {
-					if let image {
-						Image(uiImage: image)
-							.resizable()
-							.scaledToFill()
-					} else {
-						Image(systemName: "photo")
-							.font(.title2)
-							.foregroundStyle(.secondary)
-					}
-				}
-
-				if item.useCount > 0 {
-					Text(item.useCount > 999 ? "999+" : "\(item.useCount)")
-						.font(.caption2.weight(.bold))
-						.foregroundStyle(.white)
-						.padding(.horizontal, 6)
-						.frame(minHeight: 20)
-						.background(.black.opacity(0.68), in: Capsule())
-						.padding(6)
+		ZStack(alignment: .topTrailing) {
+			SquareThumbnailTile {
+				if let image {
+					Image(uiImage: image)
+						.resizable()
+						.scaledToFill()
+				} else {
+					Image(systemName: "photo")
+						.font(.title2)
+						.foregroundStyle(.secondary)
 				}
 			}
-			.contentShape(Rectangle())
+
+			if item.useCount > 0 {
+				Text(item.useCount > 999 ? "999+" : "\(item.useCount)")
+					.font(.caption2.weight(.bold))
+					.foregroundStyle(.white)
+					.padding(.horizontal, 6)
+					.frame(minHeight: 20)
+					.background(.black.opacity(0.68), in: Capsule())
+					.padding(6)
+			}
 		}
-		.buttonStyle(.plain)
+		.contentShape(Rectangle())
+		.onTapGesture(perform: select)
+		.onLongPressGesture(perform: preview)
 		.task(id: item.id) {
 			image = SharedSettings.generationAssetData(for: item).flatMap(UIImage.init(data:))
 		}
 		.accessibilityLabel("Saved generation asset")
+		.accessibilityHint("Tap to add. Touch and hold to preview.")
 	}
 }
 
@@ -1174,9 +1139,6 @@ private final class MemeForgeModel {
 		didSet {
 			guard oldValue != mode else { return }
 			SharedSettings.appMemeMode = mode.rawValue
-			if mode != .generate {
-				showingAssetPicker = false
-			}
 			resetResults()
 			refreshHistoryIfNeeded()
 			refreshGenerationAssetCollection()
@@ -1193,13 +1155,6 @@ private final class MemeForgeModel {
 	var requestError: RequestError?
 	var isLoading = false
 	var showingHistory = false
-	var showingAssetPicker = false {
-		didSet {
-			if showingAssetPicker {
-				refreshGenerationAssetCollection()
-			}
-		}
-	}
 	var selectedGenerationAssets: [SelectedGenerationAsset] = []
 	var generationAssetCollection: [SharedSettings.GenerationAssetItem] = []
 	var statusMessage: String?
