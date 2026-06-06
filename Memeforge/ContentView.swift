@@ -173,9 +173,13 @@ private struct MemeForgeView: View {
 				item: item,
 				delete: item.canDelete ? {
 					deletePreviewItem(item)
-				} : nil
+				} : nil,
+				close: {
+					fullScreenPreview = nil
+				}
 			) {
 				copyPreviewItem(item)
+				fullScreenPreview = nil
 			}
 		}
 	}
@@ -535,8 +539,16 @@ private struct GenerationAssetCollectionCell: View {
 		.task(id: item.id) {
 			image = SharedSettings.generationAssetData(for: item).flatMap(UIImage.init(data:))
 		}
+		.accessibilityElement(children: .ignore)
 		.accessibilityLabel("Saved generation asset")
-		.accessibilityHint("Tap to add. Touch and hold to preview.")
+		.accessibilityHint("Tap to add. Preview opens fullscreen.")
+		.accessibilityAddTraits(.isButton)
+		.accessibilityAction {
+			select()
+		}
+		.accessibilityAction(named: "Preview") {
+			preview()
+		}
 	}
 }
 
@@ -638,11 +650,9 @@ private enum FullScreenPreviewItem: Identifiable {
 }
 
 private struct FullScreenImagePreview: View {
-	@Environment(\.dismiss) private var dismiss
-	@State private var copied = false
-
 	let item: FullScreenPreviewItem
 	let delete: (() -> Void)?
+	let close: () -> Void
 	let copy: () -> Void
 
 	var body: some View {
@@ -672,7 +682,7 @@ private struct FullScreenImagePreview: View {
 			if let delete {
 				controlButton(systemName: "trash.fill", accessibilityLabel: "Delete") {
 					delete()
-					dismiss()
+					close()
 				}
 			}
 			Spacer()
@@ -694,20 +704,13 @@ private struct FullScreenImagePreview: View {
 	private var controlRow: some View {
 		HStack {
 			controlButton(systemName: "xmark", accessibilityLabel: "Close") {
-				dismiss()
+				close()
 			}
 
 			Spacer()
 
-			controlButton(systemName: copied ? "checkmark" : "doc.on.doc.fill", accessibilityLabel: "Copy") {
+			controlButton(systemName: "doc.on.doc.fill", accessibilityLabel: "Copy") {
 				copy()
-				copied = true
-				Task {
-					try? await Task.sleep(nanoseconds: 1_100_000_000)
-					await MainActor.run {
-						copied = false
-					}
-				}
 			}
 		}
 	}
