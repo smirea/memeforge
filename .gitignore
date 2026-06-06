@@ -4,7 +4,6 @@ DerivedData
 .derivedData
 xcuserdata/
 *.xcuserstate
-.env
 .env.local
 Config/LocalSecrets.xcconfig
 
