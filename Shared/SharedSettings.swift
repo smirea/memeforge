@@ -143,6 +143,18 @@ enum SharedSettings {
 	}
 
 	@discardableResult
+	static func deleteGenerationAsset(id: UUID) -> Bool {
+		var collection = generationAssetCollection
+		guard let index = collection.firstIndex(where: { $0.id == id }) else { return false }
+		let item = collection.remove(at: index)
+		if let url = generationAssetURL(for: item.filename) {
+			try? FileManager.default.removeItem(at: url)
+		}
+		saveGenerationAssetCollection(collection)
+		return true
+	}
+
+	@discardableResult
 	static func recordGenerationAssetUses(_ ids: [UUID]) -> [UUID: Int] {
 		let usedIDs = Set(ids)
 		guard !usedIDs.isEmpty else { return [:] }
@@ -193,6 +205,16 @@ enum SharedSettings {
 		history.insert(item, at: 0)
 		saveGiphyMemeHistory(history)
 		return item.useCount
+	}
+
+	@discardableResult
+	static func deleteGiphyMeme(copyURL: URL) -> Bool {
+		var history = giphyMemeHistory
+		let oldCount = history.count
+		history.removeAll { $0.copyURL == copyURL }
+		guard history.count != oldCount else { return false }
+		saveGiphyMemeHistory(history)
+		return true
 	}
 
 	private static func bundledValue(forInfoKey key: String) -> String {

@@ -101,8 +101,7 @@ private extension View {
 
 private struct MemeForgeView: View {
 	@Bindable var model: MemeForgeModel
-	@State private var addPickerItems: [PhotosPickerItem] = []
-	@State private var pickPickerItems: [PhotosPickerItem] = []
+	@State private var pickerItems: [PhotosPickerItem] = []
 	@State private var fullScreenPreview: FullScreenPreviewItem?
 	@FocusState private var inputFocused: Bool
 
@@ -170,14 +169,19 @@ private struct MemeForgeView: View {
 			model.refreshGenerationAssetCollection()
 		}
 		.fullScreenCover(item: $fullScreenPreview) { item in
-			FullScreenImagePreview(item: item) {
+			FullScreenImagePreview(
+				item: item,
+				delete: item.canDelete ? {
+					deletePreviewItem(item)
+				} : nil
+			) {
 				copyPreviewItem(item)
 			}
 		}
 	}
 
 	private var contentHorizontalPadding: CGFloat {
-		model.mode == .search && !model.results.isEmpty ? 0 : 16
+		model.hasTiledContent ? 0 : 16
 	}
 
 	private var bottomControls: some View {
@@ -214,13 +218,9 @@ private struct MemeForgeView: View {
 				)
 			}
 		}
-		.onChange(of: addPickerItems) { _, items in
-			importPickerItems(items, saveToCollection: true)
-			addPickerItems = []
-		}
-		.onChange(of: pickPickerItems) { _, items in
-			importPickerItems(items, saveToCollection: false)
-			pickPickerItems = []
+		.onChange(of: pickerItems) { _, items in
+			importPickerItems(items)
+			pickerItems = []
 		}
 	}
 
@@ -240,8 +240,10 @@ private struct MemeForgeView: View {
 						.submitLabel(model.mode == .search ? .search : .done)
 						.focused($inputFocused)
 						.onSubmit {
-							model.submit()
-							inputFocused = false
+							submitQuery()
+						}
+						.onChange(of: model.query) { _, value in
+							submitIfKeyboardInsertedNewline(value)
 						}
 
 					if !model.query.isEmpty {
@@ -262,7 +264,7 @@ private struct MemeForgeView: View {
 				.liquidGlassSurface(cornerRadius: 22, interactive: true)
 
 				if model.mode == .generate {
-					PhotosPicker(selection: $addPickerItems, maxSelectionCount: nil, matching: .images) {
+					PhotosPicker(selection: $pickerItems, maxSelectionCount: nil, matching: .images) {
 						Image(systemName: "photo.stack")
 							.font(.title3.weight(.semibold))
 							.frame(width: 58, height: 58)
@@ -271,22 +273,23 @@ private struct MemeForgeView: View {
 					.liquidGlassSurface(cornerRadius: 22, interactive: true)
 					.disabled(model.isLoading)
 					.accessibilityLabel("Add generation assets")
-
-					PhotosPicker(selection: $pickPickerItems, maxSelectionCount: nil, matching: .images) {
-						Image(systemName: "photo")
-							.font(.title3.weight(.semibold))
-							.frame(width: 58, height: 58)
-					}
-					.buttonStyle(.plain)
-					.liquidGlassSurface(cornerRadius: 22, interactive: true)
-					.disabled(model.isLoading)
-					.accessibilityLabel("Pick generation assets for this prompt")
 				}
 			}
 		}
 	}
 
-	private func importPickerItems(_ items: [PhotosPickerItem], saveToCollection: Bool) {
+	private func submitQuery() {
+		model.submit()
+		inputFocused = false
+	}
+
+	private func submitIfKeyboardInsertedNewline(_ value: String) {
+		guard value.rangeOfCharacter(from: .newlines) != nil else { return }
+		model.query = value.components(separatedBy: .newlines).joined(separator: " ")
+		submitQuery()
+	}
+
+	private func importPickerItems(_ items: [PhotosPickerItem]) {
 		guard !items.isEmpty else { return }
 		inputFocused = false
 		Task {
@@ -300,7 +303,7 @@ private struct MemeForgeView: View {
 				payloads.append(payload)
 			}
 			await MainActor.run {
-				model.insertPickedGenerationAssets(payloads, saveToCollection: saveToCollection)
+				model.insertPickedGenerationAssets(payloads)
 			}
 		}
 	}
@@ -309,17 +312,27 @@ private struct MemeForgeView: View {
 		guard let data = SharedSettings.generationAssetData(for: item) else { return }
 		fullScreenPreview = .asset(
 			id: item.id,
+			collectionID: item.id,
 			title: "Saved generation asset",
 			imageData: data,
 			pasteboardType: UTType(mimeType: item.mimeType)?.identifier ?? item.mimeType
 		)
 	}
 
+	private func deletePreviewItem(_ item: FullScreenPreviewItem) {
+		switch item {
+		case .result(let result):
+			model.deleteHistoryResult(result)
+		case .asset(let id, let collectionID, _, _, _):
+			model.deleteGenerationAsset(id: id, collectionID: collectionID)
+		}
+	}
+
 	private func copyPreviewItem(_ item: FullScreenPreviewItem) {
 		switch item {
 		case .result(let result):
 			model.copy(result)
-		case .asset(_, _, let imageData, let pasteboardType):
+		case .asset(_, _, _, let imageData, let pasteboardType):
 			model.copyImageData(imageData, pasteboardType: pasteboardType)
 		}
 	}
@@ -566,13 +579,13 @@ private struct MemeResultCell: View {
 
 private enum FullScreenPreviewItem: Identifiable {
 	case result(MemeResult)
-	case asset(id: UUID, title: String, imageData: Data, pasteboardType: String)
+	case asset(id: UUID, collectionID: UUID?, title: String, imageData: Data, pasteboardType: String)
 
 	var id: String {
 		switch self {
 		case .result(let result):
 			"result-\(result.id.uuidString)"
-		case .asset(let id, _, _, _):
+		case .asset(let id, _, _, _, _):
 			"asset-\(id.uuidString)"
 		}
 	}
@@ -581,8 +594,17 @@ private enum FullScreenPreviewItem: Identifiable {
 		switch self {
 		case .result(let result):
 			result.title.isEmpty ? "Meme" : result.title
-		case .asset(_, let title, _, _):
+		case .asset(_, _, let title, _, _):
 			title
+		}
+	}
+
+	var canDelete: Bool {
+		switch self {
+		case .result(let result):
+			result.useCount > 0
+		case .asset:
+			true
 		}
 	}
 
@@ -590,7 +612,7 @@ private enum FullScreenPreviewItem: Identifiable {
 		switch self {
 		case .result(let result):
 			result.imageData
-		case .asset(_, _, let imageData, _):
+		case .asset(_, _, _, let imageData, _):
 			imageData
 		}
 	}
@@ -607,6 +629,7 @@ private enum FullScreenPreviewItem: Identifiable {
 	static func selectedAsset(_ asset: SelectedGenerationAsset) -> FullScreenPreviewItem {
 		.asset(
 			id: asset.id,
+			collectionID: asset.collectionID,
 			title: "Selected generation asset",
 			imageData: asset.imageData,
 			pasteboardType: UTType(mimeType: asset.mimeType)?.identifier ?? asset.mimeType
@@ -619,6 +642,7 @@ private struct FullScreenImagePreview: View {
 	@State private var copied = false
 
 	let item: FullScreenPreviewItem
+	let delete: (() -> Void)?
 	let copy: () -> Void
 
 	var body: some View {
@@ -630,12 +654,29 @@ private struct FullScreenImagePreview: View {
 				.ignoresSafeArea()
 				.accessibilityLabel(item.title)
 		}
+		.safeAreaInset(edge: .top, spacing: 0) {
+			topControls
+				.padding(.horizontal, 24)
+				.padding(.top, 12)
+		}
 		.safeAreaInset(edge: .bottom, spacing: 0) {
 			controls
 				.padding(.horizontal, 24)
 				.padding(.bottom, 12)
 		}
 		.statusBarHidden()
+	}
+
+	private var topControls: some View {
+		HStack {
+			if let delete {
+				controlButton(systemName: "trash.fill", accessibilityLabel: "Delete") {
+					delete()
+					dismiss()
+				}
+			}
+			Spacer()
+		}
 	}
 
 	private var controls: some View {
@@ -1159,6 +1200,9 @@ private final class MemeForgeModel {
 	var generationAssetCollection: [SharedSettings.GenerationAssetItem] = []
 	var statusMessage: String?
 	var copiedResultID: UUID?
+	var hasTiledContent: Bool {
+		!results.isEmpty || isLoading || (mode == .generate && !generationAssetCollection.isEmpty)
+	}
 
 	private var searchQuery = ""
 	private var searchOffset = 0
@@ -1206,17 +1250,13 @@ private final class MemeForgeModel {
 		generationAssetCollection = SharedSettings.generationAssetCollection
 	}
 
-	func insertPickedGenerationAssets(_ payloads: [SharedSettings.GenerationAssetPayload], saveToCollection: Bool) {
+	func insertPickedGenerationAssets(_ payloads: [SharedSettings.GenerationAssetPayload]) {
 		guard !payloads.isEmpty else { return }
 
 		var assets: [SelectedGenerationAsset] = []
 		for payload in payloads {
-			if saveToCollection {
-				guard let item = SharedSettings.addGenerationAsset(payload) else { continue }
-				assets.append(SelectedGenerationAsset(collectionItem: item, imageData: payload.data))
-			} else {
-				assets.append(SelectedGenerationAsset(collectionID: nil, imageData: payload.data, mimeType: payload.mimeType, useCount: 0))
-			}
+			guard let item = SharedSettings.addGenerationAsset(payload) else { continue }
+			assets.append(SelectedGenerationAsset(collectionItem: item, imageData: payload.data))
 		}
 		guard !assets.isEmpty else { return }
 
@@ -1238,6 +1278,33 @@ private final class MemeForgeModel {
 	func removeGenerationAsset(_ asset: SelectedGenerationAsset) {
 		selectedGenerationAssets.removeAll { $0.id == asset.id }
 		resetResults()
+	}
+
+	func deleteGenerationAsset(id: UUID, collectionID: UUID?) {
+		selectedGenerationAssets.removeAll { asset in
+			asset.id == id || asset.collectionID == collectionID
+		}
+		if let collectionID {
+			SharedSettings.deleteGenerationAsset(id: collectionID)
+			refreshGenerationAssetCollection()
+		}
+		resetResults()
+		showStatus("Deleted")
+	}
+
+	func deleteHistoryResult(_ result: MemeResult) {
+		guard let copyURL = result.copyURL else { return }
+		guard SharedSettings.deleteGiphyMeme(copyURL: copyURL) else { return }
+		historyUseCounts[copyURL.absoluteString] = nil
+		if showingHistory {
+			results.removeAll { $0.copyURL == copyURL }
+			showingHistory = !results.isEmpty
+		} else {
+			for index in results.indices where results[index].copyURL == copyURL {
+				results[index] = results[index].withUseCount(0)
+			}
+		}
+		showStatus("Deleted")
 	}
 
 	func refreshHistoryIfNeeded() {

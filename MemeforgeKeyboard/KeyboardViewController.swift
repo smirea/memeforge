@@ -22,11 +22,6 @@ final class KeyboardViewController: UIInputViewController {
 		case capsLock
 	}
 
-	private enum MediaImportMode {
-		case add
-		case pick
-	}
-
 	fileprivate struct MemeResult: Hashable {
 		let id = UUID()
 		let title: String
@@ -127,7 +122,6 @@ final class KeyboardViewController: UIInputViewController {
 	private var historyUseCounts: [String: Int] = [:]
 	private var showingHistory = false
 	private var assetPickerVisible = false
-	private var activeMediaImportMode = MediaImportMode.pick
 	private var selectedGenerationAssets: [SelectedGenerationAsset] = []
 	private var generationAssetCollection: [SharedSettings.GenerationAssetItem] = []
 	private let keyFeedback = UIImpactFeedbackGenerator(style: .light)
@@ -168,7 +162,6 @@ final class KeyboardViewController: UIInputViewController {
 	private lazy var assetToggleButton = smallButton("photo.stack", action: #selector(showAssetPicker))
 	private let assetPickerControls = UIStackView()
 	private lazy var addAssetButton = assetPickerButton(title: "Add", systemName: "plus", action: #selector(addAssetsTapped))
-	private lazy var pickAssetButton = assetPickerButton(title: "Pick", systemName: "photo", action: #selector(pickAssetsTapped))
 	private let accessBox = UIView()
 	private let accessTitleLabel = UILabel()
 	private let accessDetailLabel = UILabel()
@@ -385,15 +378,14 @@ final class KeyboardViewController: UIInputViewController {
 		queryRow.addArrangedSubview(assetToggleButton)
 		rootStack.addArrangedSubview(queryRow)
 
-		assetPickerControls.axis = .horizontal
-		assetPickerControls.spacing = 8
-		assetPickerControls.alignment = .fill
-		assetPickerControls.distribution = .fillEqually
-		assetPickerControls.isHidden = true
-		assetPickerControls.addArrangedSubview(addAssetButton)
-		assetPickerControls.addArrangedSubview(pickAssetButton)
-		addAssetButton.heightAnchor.constraint(equalToConstant: assetPickerControlsHeight).isActive = true
-		rootStack.addArrangedSubview(assetPickerControls)
+			assetPickerControls.axis = .horizontal
+			assetPickerControls.spacing = 8
+			assetPickerControls.alignment = .fill
+			assetPickerControls.distribution = .fillEqually
+			assetPickerControls.isHidden = true
+			assetPickerControls.addArrangedSubview(addAssetButton)
+			addAssetButton.heightAnchor.constraint(equalToConstant: assetPickerControlsHeight).isActive = true
+			rootStack.addArrangedSubview(assetPickerControls)
 		rootStack.addArrangedSubview(selectedAssetsCollectionView)
 
 		rootStack.addArrangedSubview(accessBox)
@@ -722,11 +714,10 @@ final class KeyboardViewController: UIInputViewController {
 		assetToggleButton.tintColor = textColor
 		keyboardRestoreButton.backgroundColor = isDark ? systemColor : .tertiarySystemBackground
 		keyboardRestoreButton.tintColor = textColor
-		closeButton.backgroundColor = isDark ? systemColor : .tertiarySystemBackground
-		closeButton.tintColor = textColor
-		styleAssetPickerButton(addAssetButton, filled: true, isDark: isDark)
-		styleAssetPickerButton(pickAssetButton, filled: false, isDark: isDark)
-		queryCaret.backgroundColor = .systemBlue
+			closeButton.backgroundColor = isDark ? systemColor : .tertiarySystemBackground
+			closeButton.tintColor = textColor
+			styleAssetPickerButton(addAssetButton, filled: true, isDark: isDark)
+			queryCaret.backgroundColor = .systemBlue
 		queryClearButton.tintColor = isDark ? UIColor(white: 0.75, alpha: 1) : UIColor.secondaryLabel
 		loadingIndicator.color = isDark ? .white : .secondaryLabel
 		applyQueryInputFocus(animated: false)
@@ -897,11 +888,7 @@ final class KeyboardViewController: UIInputViewController {
 	}
 
 	@objc private func addAssetsTapped() {
-		presentMediaPicker(importMode: .add)
-	}
-
-	@objc private func pickAssetsTapped() {
-		presentMediaPicker(importMode: .pick)
+		presentMediaPicker()
 	}
 
 	private func updatePrompt() {
@@ -1249,17 +1236,13 @@ final class KeyboardViewController: UIInputViewController {
 		}
 	}
 
-	private func insertPickedGenerationAssets(_ payloads: [SharedSettings.GenerationAssetPayload], saveToCollection: Bool) {
+	private func insertPickedGenerationAssets(_ payloads: [SharedSettings.GenerationAssetPayload]) {
 		guard !payloads.isEmpty else { return }
 
 		var assets: [SelectedGenerationAsset] = []
 		for payload in payloads {
-			if saveToCollection {
-				guard let item = SharedSettings.addGenerationAsset(payload) else { continue }
-				assets.append(SelectedGenerationAsset(collectionItem: item, imageData: payload.data))
-			} else {
-				assets.append(SelectedGenerationAsset(collectionID: nil, imageData: payload.data, mimeType: payload.mimeType, useCount: 0))
-			}
+			guard let item = SharedSettings.addGenerationAsset(payload) else { continue }
+			assets.append(SelectedGenerationAsset(collectionItem: item, imageData: payload.data))
 		}
 		guard !assets.isEmpty else { return }
 
@@ -1807,8 +1790,7 @@ private final class GenerationAssetPayloadCollector: @unchecked Sendable {
 }
 
 extension KeyboardViewController: PHPickerViewControllerDelegate {
-	private func presentMediaPicker(importMode: MediaImportMode) {
-		activeMediaImportMode = importMode
+	private func presentMediaPicker() {
 		var configuration = PHPickerConfiguration()
 		configuration.filter = .images
 		configuration.selectionLimit = 0
@@ -1819,13 +1801,12 @@ extension KeyboardViewController: PHPickerViewControllerDelegate {
 	}
 
 	func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
-		let importMode = activeMediaImportMode
 		picker.dismiss(animated: true) { [weak self] in
-			self?.importPickerResults(results, saveToCollection: importMode == .add)
+			self?.importPickerResults(results)
 		}
 	}
 
-	private func importPickerResults(_ results: [PHPickerResult], saveToCollection: Bool) {
+	private func importPickerResults(_ results: [PHPickerResult]) {
 		guard !results.isEmpty else { return }
 
 		let group = DispatchGroup()
@@ -1852,7 +1833,7 @@ extension KeyboardViewController: PHPickerViewControllerDelegate {
 		}
 
 		group.notify(queue: .main) { [weak self] in
-			self?.insertPickedGenerationAssets(payloads.values, saveToCollection: saveToCollection)
+			self?.insertPickedGenerationAssets(payloads.values)
 		}
 	}
 }
