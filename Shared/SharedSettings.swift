@@ -10,9 +10,11 @@ enum SharedSettings {
 	private static let copiedPreviewVersionKey = "copiedMemePreviewVersion"
 	private static let giphyMemeHistoryKey = "giphyMemeHistory"
 	private static let generationAssetCollectionKey = "generationAssetCollection"
+	private static let generationHistoryKey = "generationHistory"
 	private static let appShowsSettingsKey = "appShowsSettings"
 	private static let appMemeModeKey = "appMemeMode"
 	private static let generationAssetMaxSide: CGFloat = 1280
+	private static let generationHistoryMaxCount = 80
 
 	struct GiphyMemeHistoryItem: Codable, Equatable {
 		var title: String
@@ -35,6 +37,20 @@ enum SharedSettings {
 		var mimeType: String
 		var addedAt: TimeInterval
 		var useCount: Int
+	}
+
+	struct GenerationHistoryAsset: Codable, Equatable, Identifiable, Sendable {
+		var id: UUID
+		var filename: String
+		var mimeType: String
+	}
+
+	struct GenerationHistoryItem: Codable, Equatable, Identifiable, Sendable {
+		var id: UUID
+		var prompt: String
+		var createdAt: TimeInterval
+		var attachments: [GenerationHistoryAsset]
+		var images: [GenerationHistoryAsset]
 	}
 
 	static var store: UserDefaults {
@@ -95,6 +111,15 @@ enum SharedSettings {
 		return collection.sorted { $0.addedAt > $1.addedAt }
 	}
 
+	static var generationHistory: [GenerationHistoryItem] {
+		guard let data = store.data(forKey: generationHistoryKey),
+			let history = try? JSONDecoder().decode([GenerationHistoryItem].self, from: data)
+		else {
+			return []
+		}
+		return history.sorted { $0.createdAt > $1.createdAt }
+	}
+
 	static func normalizedGenerationAssetPayload(from data: Data) -> GenerationAssetPayload? {
 		guard let image = UIImage(data: data) else { return nil }
 		let normalized = image.resizedToFit(maxSide: generationAssetMaxSide)
@@ -150,6 +175,11 @@ enum SharedSettings {
 		return try? Data(contentsOf: url)
 	}
 
+	static func generationHistoryData(for asset: GenerationHistoryAsset) -> Data? {
+		guard let url = generationHistoryURL(for: asset.filename) else { return nil }
+		return try? Data(contentsOf: url)
+	}
+
 	@discardableResult
 	static func deleteGenerationAsset(id: UUID) -> Bool {
 		var collection = generationAssetCollection
@@ -175,6 +205,35 @@ enum SharedSettings {
 		}
 		saveGenerationAssetCollection(collection)
 		return counts
+	}
+
+	@discardableResult
+	static func recordGenerationHistory(
+		prompt: String,
+		attachments: [GenerationAssetPayload],
+		images: [GenerationAssetPayload]
+	) -> GenerationHistoryItem? {
+		guard !images.isEmpty, let directory = generationHistoryDirectory() else { return nil }
+		let entryID = UUID()
+		let imageAssets = images.enumerated().compactMap { index, payload in
+			writeGenerationHistoryAsset(entryID: entryID, kind: "image", index: index, payload: payload, directory: directory)
+		}
+		guard !imageAssets.isEmpty else { return nil }
+
+		let attachmentAssets = attachments.enumerated().compactMap { index, payload in
+			writeGenerationHistoryAsset(entryID: entryID, kind: "attachment", index: index, payload: payload, directory: directory)
+		}
+		let item = GenerationHistoryItem(
+			id: entryID,
+			prompt: prompt,
+			createdAt: Date().timeIntervalSince1970,
+			attachments: attachmentAssets,
+			images: imageAssets
+		)
+		var history = generationHistory
+		history.insert(item, at: 0)
+		saveGenerationHistory(history)
+		return item
 	}
 
 	@discardableResult
@@ -242,6 +301,16 @@ enum SharedSettings {
 		store.set(data, forKey: generationAssetCollectionKey)
 	}
 
+	private static func saveGenerationHistory(_ history: [GenerationHistoryItem]) {
+		let sorted = history.sorted { $0.createdAt > $1.createdAt }
+		let trimmed = Array(sorted.prefix(generationHistoryMaxCount))
+		guard let data = try? JSONEncoder().encode(trimmed) else { return }
+		store.set(data, forKey: generationHistoryKey)
+		pruneGenerationHistoryFiles(keeping: Set(trimmed.flatMap { item in
+			(item.attachments + item.images).map(\.filename)
+		}))
+	}
+
 	private static func generationAssetDirectory() -> URL? {
 		let baseURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupID)
 			?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
@@ -252,6 +321,47 @@ enum SharedSettings {
 
 	private static func generationAssetURL(for filename: String) -> URL? {
 		generationAssetDirectory()?.appendingPathComponent(filename)
+	}
+
+	private static func generationHistoryDirectory() -> URL? {
+		let baseURL = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: appGroupID)
+			?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+		guard let directory = baseURL?.appendingPathComponent("GenerationHistory", isDirectory: true) else { return nil }
+		try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+		return directory
+	}
+
+	private static func generationHistoryURL(for filename: String) -> URL? {
+		generationHistoryDirectory()?.appendingPathComponent(filename)
+	}
+
+	private static func writeGenerationHistoryAsset(
+		entryID: UUID,
+		kind: String,
+		index: Int,
+		payload: GenerationAssetPayload,
+		directory: URL
+	) -> GenerationHistoryAsset? {
+		let id = UUID()
+		let filename = "\(entryID.uuidString)-\(kind)-\(index)-\(id.uuidString).\(generationAssetExtension(for: payload.mimeType))"
+		let url = directory.appendingPathComponent(filename)
+		do {
+			try payload.data.write(to: url, options: .atomic)
+			return GenerationHistoryAsset(id: id, filename: filename, mimeType: payload.mimeType)
+		} catch {
+			return nil
+		}
+	}
+
+	private static func pruneGenerationHistoryFiles(keeping retainedFilenames: Set<String>) {
+		guard let directory = generationHistoryDirectory(),
+			let urls = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+		else {
+			return
+		}
+		for url in urls where !retainedFilenames.contains(url.lastPathComponent) {
+			try? FileManager.default.removeItem(at: url)
+		}
 	}
 
 	private static func generationAssetExtension(for mimeType: String) -> String {
