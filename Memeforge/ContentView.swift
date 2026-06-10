@@ -112,8 +112,9 @@ private struct MemeForgeView: View {
 					if model.mode == .generate, !model.generationAssetCollection.isEmpty {
 						GenerationAssetCollectionGrid(
 							items: model.generationAssetCollection,
+							selectedCollectionIDs: model.selectedGenerationAssetCollectionIDs,
 							select: { item in
-								model.insertGenerationAsset(item)
+								model.toggleGenerationAsset(item)
 							},
 							preview: { item in
 								openGenerationAsset(item)
@@ -171,6 +172,7 @@ private struct MemeForgeView: View {
 		.fullScreenCover(item: $fullScreenPreview) { item in
 			FullScreenImagePreview(
 				item: item,
+				selection: previewSelectionAction(for: item),
 				delete: item.canDelete ? {
 					deletePreviewItem(item)
 				} : nil,
@@ -315,6 +317,16 @@ private struct MemeForgeView: View {
 	private func openGenerationAsset(_ item: SharedSettings.GenerationAssetItem) {
 		guard let data = SharedSettings.generationAssetData(for: item) else { return }
 		fullScreenPreview = .collectionAsset(item, imageData: data)
+	}
+
+	private func previewSelectionAction(for item: FullScreenPreviewItem) -> PreviewSelectionAction? {
+		guard let collectionID = item.collectionID else { return nil }
+		return PreviewSelectionAction(
+			isSelected: model.isGenerationAssetSelected(collectionID: collectionID),
+			toggle: {
+				model.toggleGenerationAsset(collectionID: collectionID)
+			}
+		)
 	}
 
 	private func deletePreviewItem(_ item: FullScreenPreviewItem) {
@@ -485,6 +497,7 @@ private struct SelectedGenerationAssetThumbnail: View {
 
 private struct GenerationAssetCollectionGrid: View {
 	let items: [SharedSettings.GenerationAssetItem]
+	let selectedCollectionIDs: Set<UUID>
 	let select: (SharedSettings.GenerationAssetItem) -> Void
 	let preview: (SharedSettings.GenerationAssetItem) -> Void
 
@@ -493,7 +506,7 @@ private struct GenerationAssetCollectionGrid: View {
 	var body: some View {
 		LazyVGrid(columns: columns, spacing: 0) {
 			ForEach(items) { item in
-				GenerationAssetCollectionCell(item: item) {
+				GenerationAssetCollectionCell(item: item, isSelected: selectedCollectionIDs.contains(item.id)) {
 					select(item)
 				} preview: {
 					preview(item)
@@ -505,63 +518,101 @@ private struct GenerationAssetCollectionGrid: View {
 
 private struct GenerationAssetCollectionCell: View {
 	let item: SharedSettings.GenerationAssetItem
+	let isSelected: Bool
 	let select: () -> Void
 	let preview: () -> Void
 
 	@State private var image: UIImage?
 
 	var body: some View {
-		ZStack(alignment: .bottomTrailing) {
-			Button(action: preview) {
-				ZStack(alignment: .topTrailing) {
-					SquareThumbnailTile {
-						if let image {
-							Image(uiImage: image)
-								.resizable()
-								.scaledToFill()
-						} else {
-							Image(systemName: "photo")
-								.font(.title2)
-								.foregroundStyle(.secondary)
-						}
-					}
-
-					if item.useCount > 0 {
-						Text(item.useCount > 999 ? "999+" : "\(item.useCount)")
-							.font(.caption2.weight(.bold))
-							.foregroundStyle(.white)
-							.padding(.horizontal, 6)
-							.frame(minHeight: 20)
-							.background(.black.opacity(0.68), in: Capsule())
-							.padding(6)
-					}
+		ZStack(alignment: .topTrailing) {
+			SquareThumbnailTile {
+				if let image {
+					Image(uiImage: image)
+						.resizable()
+						.scaledToFill()
+				} else {
+					Image(systemName: "photo")
+						.font(.title2)
+						.foregroundStyle(.secondary)
 				}
 			}
-			.buttonStyle(.plain)
 
-			Button(action: select) {
-				Image(systemName: "plus.circle.fill")
+			if item.useCount > 0 {
+				Text(item.useCount > 999 ? "999+" : "\(item.useCount)")
+					.font(.caption2.weight(.bold))
+					.foregroundStyle(.white)
+					.padding(.horizontal, 6)
+					.frame(minHeight: 20)
+					.background(.black.opacity(0.68), in: Capsule())
+					.padding(6)
+					.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+			}
+
+			if isSelected {
+				Rectangle()
+					.stroke(Color.accentColor, lineWidth: 4)
+					.padding(2)
+
+				Image(systemName: "checkmark.circle.fill")
 					.font(.title2.weight(.semibold))
 					.foregroundStyle(.white, Color.accentColor)
-					.frame(width: 38, height: 38)
+					.padding(6)
 			}
-			.buttonStyle(.plain)
-			.padding(6)
-			.accessibilityLabel("Use saved generation asset")
 		}
+		.contentShape(Rectangle())
+		.onTapGesture(perform: select)
+		.onLongPressGesture(perform: preview)
+		.animation(.snappy, value: isSelected)
 		.task(id: item.id) {
 			image = SharedSettings.generationAssetData(for: item).flatMap(UIImage.init(data:))
 		}
 		.accessibilityElement(children: .ignore)
 		.accessibilityLabel("Saved generation asset")
-		.accessibilityHint("Opens fullscreen preview.")
+		.accessibilityValue(isSelected ? "Selected" : "Not selected")
+		.accessibilityHint("Tap to select. Long press to preview.")
 		.accessibilityAddTraits(.isButton)
+		.accessibilityAddTraits(isSelected ? .isSelected : [])
 		.accessibilityAction {
-			preview()
-		}
-		.accessibilityAction(named: "Use") {
 			select()
 		}
+		.accessibilityAction(named: "Preview") {
+			preview()
+		}
+	}
+}
+
+private struct PreviewSelectionAction {
+	let isSelected: Bool
+	let toggle: () -> Void
+}
+
+private struct PreviewSelectionButton: View {
+	let isSelected: Bool
+	let toggle: () -> Void
+
+	@ViewBuilder
+	var body: some View {
+		if isSelected {
+			button
+				.background(Color.accentColor, in: Circle())
+				.accessibilityLabel("Remove from generation assets")
+		} else {
+			button
+				.liquidGlassSurface(cornerRadius: 28, interactive: true)
+				.accessibilityLabel("Add to generation assets")
+		}
+	}
+
+	private var button: some View {
+		Button(action: toggle) {
+			Image(systemName: isSelected ? "checkmark" : "plus")
+				.font(.title3.weight(.bold))
+				.foregroundStyle(.white)
+				.frame(width: 56, height: 56)
+		}
+		.buttonStyle(.plain)
+		.animation(.snappy, value: isSelected)
 	}
 }
 
@@ -636,6 +687,15 @@ private enum FullScreenPreviewItem: Identifiable {
 		}
 	}
 
+	var collectionID: UUID? {
+		switch self {
+		case .result:
+			nil
+		case .asset(_, let collectionID, _, _, _, _):
+			collectionID
+		}
+	}
+
 	var canDelete: Bool {
 		switch self {
 		case .result(let result):
@@ -688,6 +748,7 @@ private enum FullScreenPreviewItem: Identifiable {
 
 private struct FullScreenImagePreview: View {
 	let item: FullScreenPreviewItem
+	let selection: PreviewSelectionAction?
 	let delete: (() -> Void)?
 	let close: () -> Void
 	let copy: () -> Void
@@ -723,6 +784,11 @@ private struct FullScreenImagePreview: View {
 				}
 			}
 			Spacer()
+			if let selection {
+				PreviewSelectionButton(isSelected: selection.isSelected) {
+					selection.toggle()
+				}
+			}
 		}
 	}
 
@@ -1240,6 +1306,9 @@ private final class MemeForgeModel {
 	var generationAssetCollection: [SharedSettings.GenerationAssetItem] = []
 	var statusMessage: String?
 	var copiedResultID: UUID?
+	var selectedGenerationAssetCollectionIDs: Set<UUID> {
+		Set(selectedGenerationAssets.compactMap(\.collectionID))
+	}
 	var hasTiledContent: Bool {
 		!results.isEmpty || isLoading || (mode == .generate && !generationAssetCollection.isEmpty)
 	}
@@ -1318,12 +1387,40 @@ private final class MemeForgeModel {
 		resetResults()
 	}
 
+	func isGenerationAssetSelected(collectionID: UUID) -> Bool {
+		selectedGenerationAssets.contains { $0.collectionID == collectionID }
+	}
+
+	func toggleGenerationAsset(_ item: SharedSettings.GenerationAssetItem) {
+		if isGenerationAssetSelected(collectionID: item.id) {
+			removeGenerationAsset(collectionID: item.id)
+		} else {
+			insertGenerationAsset(item)
+		}
+	}
+
+	func toggleGenerationAsset(collectionID: UUID) {
+		if isGenerationAssetSelected(collectionID: collectionID) {
+			removeGenerationAsset(collectionID: collectionID)
+			return
+		}
+
+		guard let item = generationAssetCollection.first(where: { $0.id == collectionID }) else { return }
+		insertGenerationAsset(item)
+	}
+
 	func removeGenerationAsset(_ asset: SelectedGenerationAsset) {
 		removeGenerationAsset(id: asset.id)
 	}
 
 	func removeGenerationAsset(id: UUID) {
 		selectedGenerationAssets.removeAll { $0.id == id }
+		resetResults()
+		showStatus("Removed")
+	}
+
+	func removeGenerationAsset(collectionID: UUID) {
+		selectedGenerationAssets.removeAll { $0.collectionID == collectionID }
 		resetResults()
 		showStatus("Removed")
 	}
