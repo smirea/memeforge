@@ -6,6 +6,8 @@ import UIKit
 import UniformTypeIdentifiers
 import VisionKit
 
+private let floatingSettingsButtonContentTopPadding: CGFloat = 76
+
 struct ContentView: View {
 	@State private var model = MemeForgeModel()
 	@State private var showsSettings = SharedSettings.appShowsSettings
@@ -13,17 +15,24 @@ struct ContentView: View {
 
 	var body: some View {
 		NavigationStack {
-			VStack(spacing: 0) {
-				if showsSettings || !model.usesGeneratedStage {
-					AppHeader(title: showsSettings ? "Settings" : "Memeforge", settingsActive: showsSettings) {
-						toggleMode()
-					}
-				}
-
+			ZStack(alignment: .topTrailing) {
 				if showsSettings {
-					SettingsView(appearanceTheme: $appearanceTheme)
+					VStack(spacing: 0) {
+						SettingsHeader {
+							toggleMode()
+						}
+						SettingsView(appearanceTheme: $appearanceTheme)
+					}
 				} else {
 					MemeForgeView(model: model)
+				}
+
+				if !showsSettings, !model.usesGeneratedStage {
+					SettingsToggleButton(settingsActive: false) {
+						toggleMode()
+					}
+					.padding(.top, 10)
+					.padding(.trailing, 16)
 				}
 			}
 			.frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -48,41 +57,50 @@ struct ContentView: View {
 	}
 }
 
-private struct AppHeader: View {
-	let title: String
-	let settingsActive: Bool
+private struct SettingsHeader: View {
 	let toggleMode: () -> Void
 
 	var body: some View {
 		HStack(alignment: .center, spacing: 16) {
-			Text(title)
+			Text("Settings")
 				.font(.largeTitle.weight(.bold))
 				.lineLimit(1)
 				.minimumScaleFactor(0.75)
 
 			Spacer()
 
-			Button(action: toggleMode) {
-				Image(systemName: settingsActive ? "gearshape.fill" : "gearshape")
-					.font(.title3.weight(.semibold))
-					.foregroundStyle(settingsActive ? Color.accentColor : Color.primary)
-					.frame(width: 48, height: 48)
-					.background {
-						if settingsActive {
-							Circle()
-								.fill(Color.accentColor.opacity(0.18))
-						}
-					}
+			SettingsToggleButton(settingsActive: true) {
+				toggleMode()
 			}
-			.buttonStyle(.plain)
-			.liquidGlassSurface(cornerRadius: 24, interactive: true)
-			.accessibilityLabel(settingsActive ? "Show Memeforge" : "Show settings")
-			.accessibilityValue(settingsActive ? "On" : "Off")
-			.accessibilityAddTraits(settingsActive ? .isSelected : [])
 		}
 		.padding(.horizontal, 16)
 		.padding(.top, 10)
 		.padding(.bottom, 8)
+	}
+}
+
+private struct SettingsToggleButton: View {
+	let settingsActive: Bool
+	let toggleMode: () -> Void
+
+	var body: some View {
+		Button(action: toggleMode) {
+			Image(systemName: settingsActive ? "gearshape.fill" : "gearshape")
+				.font(.title3.weight(.semibold))
+				.foregroundStyle(settingsActive ? Color.accentColor : Color.primary)
+				.frame(width: 48, height: 48)
+				.background {
+					if settingsActive {
+						Circle()
+							.fill(Color.accentColor.opacity(0.18))
+					}
+				}
+		}
+		.buttonStyle(.plain)
+		.liquidGlassSurface(cornerRadius: 24, interactive: true)
+		.accessibilityLabel(settingsActive ? "Show Memeforge" : "Show settings")
+		.accessibilityValue(settingsActive ? "On" : "Off")
+		.accessibilityAddTraits(settingsActive ? .isSelected : [])
 	}
 }
 
@@ -242,7 +260,8 @@ private struct MemeForgeView: View {
 				}
 				.frame(maxWidth: .infinity, alignment: .leading)
 				.padding(.horizontal, contentHorizontalPadding)
-				.padding(.vertical, 16)
+				.padding(.top, floatingSettingsButtonContentTopPadding)
+				.padding(.bottom, 16)
 			}
 			.scrollDismissesKeyboard(.interactively)
 		}
@@ -582,7 +601,8 @@ private struct GenerationHistoryFeed: View {
 					}
 				}
 				.padding(.horizontal, 16)
-				.padding(.vertical, 16)
+				.padding(.top, floatingSettingsButtonContentTopPadding)
+				.padding(.bottom, 16)
 			}
 		}
 		.scrollDismissesKeyboard(.interactively)
@@ -2032,13 +2052,11 @@ private final class MemeForgeModel {
 	func removeGenerationAsset(id: UUID) {
 		selectedGenerationAssets.removeAll { $0.id == id }
 		resetResults()
-		showStatus("Removed")
 	}
 
 	func removeGenerationAsset(collectionID: UUID) {
 		selectedGenerationAssets.removeAll { $0.collectionID == collectionID }
 		resetResults()
-		showStatus("Removed")
 	}
 
 	func deleteCollectionGenerationAsset(id: UUID) {
