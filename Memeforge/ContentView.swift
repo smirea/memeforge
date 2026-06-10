@@ -106,6 +106,7 @@ private struct MemeForgeView: View {
 	@State private var pickerItems: [PhotosPickerItem] = []
 	@State private var fullScreenPreview: FullScreenPreviewItem?
 	@State private var visibleGeneratedResultID: UUID?
+	@State private var generatedPromptMode: GeneratedPromptMode = .reroll
 	@FocusState private var inputFocused: Bool
 
 	var body: some View {
@@ -142,6 +143,9 @@ private struct MemeForgeView: View {
 		.onChange(of: model.results.map(\.id)) { _, ids in
 			updateVisibleGeneratedResult(for: ids)
 		}
+		.onChange(of: visibleGeneratedResultID) { _, _ in
+			syncGeneratedPromptWithVisibleResult(forceReroll: true)
+		}
 		.fullScreenCover(item: $fullScreenPreview) { item in
 			FullScreenImagePreview(
 				item: item,
@@ -167,9 +171,13 @@ private struct MemeForgeView: View {
 				isLoading: model.isLoading,
 				requestError: model.requestError,
 				currentID: $visibleGeneratedResultID,
+				close: {
+					closeGeneratedStage()
+				},
 				copy: {
 					if let result = currentGeneratedResult {
 						model.copy(result)
+						closeGeneratedStage()
 					}
 				}
 			)
@@ -230,6 +238,9 @@ private struct MemeForgeView: View {
 	private var bottomControlsContent: some View {
 		VStack(alignment: .leading, spacing: 10) {
 			if model.usesGeneratedStage {
+				GeneratedPromptModeSwitch(mode: generatedPromptMode) { mode in
+					setGeneratedPromptMode(mode)
+				}
 				queryInputArea(showAssetPicker: false)
 			} else {
 				inputArea
@@ -262,7 +273,6 @@ private struct MemeForgeView: View {
 	private func queryInputArea(showAssetPicker: Bool) -> some View {
 		VStack(alignment: .leading, spacing: 10) {
 			HStack(alignment: .center, spacing: 10) {
-				let showsInlineGenerateButton = model.mode == .generate
 				ZStack(alignment: .trailing) {
 					TextField(model.mode.placeholder, text: $model.query, axis: .vertical)
 						.lineLimit(1...5)
@@ -283,33 +293,18 @@ private struct MemeForgeView: View {
 						}
 
 					if !model.query.isEmpty {
-						if showsInlineGenerateButton {
-							Button {
-								submitQuery()
-							} label: {
-								Image(systemName: "arrow.up.circle.fill")
-									.font(.title3.weight(.semibold))
-									.foregroundStyle(model.isLoading ? .secondary : Color.accentColor)
-									.frame(width: 36, height: 36)
-							}
-							.buttonStyle(.plain)
-							.disabled(model.isLoading)
-							.padding(.trailing, 6)
-							.accessibilityLabel("Generate")
-						} else {
-							Button {
-								model.clearQuery()
-								inputFocused = true
-							} label: {
-								Image(systemName: "xmark.circle.fill")
-									.font(.body)
-									.foregroundStyle(.secondary)
-									.frame(width: 36, height: 36)
-							}
-							.buttonStyle(.plain)
-							.padding(.trailing, 6)
-							.accessibilityLabel("Clear")
+						Button {
+							model.clearQuery()
+							inputFocused = true
+						} label: {
+							Image(systemName: "xmark.circle.fill")
+								.font(.body)
+								.foregroundStyle(.secondary)
+								.frame(width: 36, height: 36)
 						}
+						.buttonStyle(.plain)
+						.padding(.trailing, 6)
+						.accessibilityLabel("Clear")
 					}
 				}
 				.liquidGlassSurface(cornerRadius: 22, interactive: true)
@@ -330,7 +325,11 @@ private struct MemeForgeView: View {
 	}
 
 	private func submitQuery() {
-		model.submit()
+		if model.usesGeneratedStage {
+			model.submitGeneratedStage(mode: generatedPromptMode, sourceResult: currentGeneratedResult)
+		} else {
+			model.submit()
+		}
 		inputFocused = false
 	}
 
@@ -353,6 +352,38 @@ private struct MemeForgeView: View {
 	private func updateVisibleGeneratedResult(for ids: [UUID]) {
 		guard model.mode == .generate else { return }
 		visibleGeneratedResultID = ids.last
+		syncGeneratedPromptWithVisibleResult(forceReroll: true)
+	}
+
+	private func setGeneratedPromptMode(_ mode: GeneratedPromptMode) {
+		generatedPromptMode = mode
+		syncGeneratedPromptWithVisibleResult(forceReroll: false)
+		inputFocused = true
+	}
+
+	private func syncGeneratedPromptWithVisibleResult(forceReroll: Bool) {
+		guard model.usesGeneratedStage else {
+			generatedPromptMode = .reroll
+			return
+		}
+		if forceReroll {
+			generatedPromptMode = .reroll
+		}
+
+		switch generatedPromptMode {
+		case .reroll:
+			if let prompt = currentGeneratedResult?.title {
+				model.query = prompt
+			}
+		case .update:
+			model.query = ""
+		}
+	}
+
+	private func closeGeneratedStage() {
+		model.closeGeneratedStage()
+		visibleGeneratedResultID = nil
+		generatedPromptMode = .reroll
 	}
 
 	private func importPickerItems(_ items: [PhotosPickerItem]) {
@@ -490,6 +521,7 @@ private struct GeneratedResultsStage: View {
 	let isLoading: Bool
 	let requestError: RequestError?
 	@Binding var currentID: UUID?
+	let close: () -> Void
 	let copy: () -> Void
 
 	var body: some View {
@@ -537,7 +569,23 @@ private struct GeneratedResultsStage: View {
 
 			VStack {
 				HStack {
+					Button(action: close) {
+						Image(systemName: "xmark")
+							.font(.title3.weight(.bold))
+							.foregroundStyle(.white)
+							.frame(width: 56, height: 56)
+							.background(.black.opacity(0.62), in: Circle())
+							.overlay {
+								Circle()
+									.stroke(.white.opacity(0.24), lineWidth: 1)
+							}
+					}
+					.buttonStyle(.plain)
+					.contentShape(Circle())
+					.accessibilityLabel("Close generation")
+
 					Spacer()
+
 					Button(action: copy) {
 						Image(systemName: "doc.on.doc.fill")
 							.font(.title3.weight(.bold))
@@ -567,6 +615,38 @@ private struct GeneratedResultsStage: View {
 			currentID = ids.last
 		}
 		.animation(.snappy, value: results.map(\.id))
+	}
+}
+
+private struct GeneratedPromptModeSwitch: View {
+	let mode: GeneratedPromptMode
+	let select: (GeneratedPromptMode) -> Void
+
+	var body: some View {
+		HStack(spacing: 4) {
+			ForEach(GeneratedPromptMode.allCases) { option in
+				Button {
+					select(option)
+				} label: {
+					Text(option.title)
+						.font(.subheadline.weight(.semibold))
+						.foregroundStyle(mode == option ? .white : .primary)
+						.frame(maxWidth: .infinity)
+						.padding(.vertical, 10)
+						.background {
+							if mode == option {
+								Capsule()
+									.fill(Color.accentColor)
+							}
+						}
+				}
+				.buttonStyle(.plain)
+				.accessibilityLabel(option.title)
+				.accessibilityAddTraits(mode == option ? .isSelected : [])
+			}
+		}
+		.padding(4)
+		.liquidGlassSurface(cornerRadius: 19, interactive: true)
 	}
 }
 
@@ -1530,6 +1610,29 @@ private final class MemeForgeModel {
 		}
 	}
 
+	func submitGeneratedStage(mode: GeneratedPromptMode, sourceResult: MemeResult?) {
+		let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+		requestError = nil
+		guard !trimmed.isEmpty else { return }
+
+		switch mode {
+		case .reroll:
+			generate(trimmed, assetsOverride: sourceResult?.generationAssets ?? selectedGenerationAssets)
+		case .update:
+			guard let sourceResult, let imageData = sourceResult.imageData else {
+				showRequestError(title: "No generated image", detail: "Generate an image before updating it.")
+				return
+			}
+			let mimeType = UTType(sourceResult.pasteboardType)?.preferredMIMEType ?? "image/png"
+			let asset = SelectedGenerationAsset(collectionID: nil, imageData: imageData, mimeType: mimeType, useCount: 0)
+			generate(trimmed, assetsOverride: [asset])
+		}
+	}
+
+	func closeGeneratedStage() {
+		resetResults()
+	}
+
 	func clearQuery() {
 		query = ""
 	}
@@ -1745,7 +1848,7 @@ private final class MemeForgeModel {
 		}
 	}
 
-	private func generate(_ trimmed: String) {
+	private func generate(_ trimmed: String, assetsOverride: [SelectedGenerationAsset]? = nil) {
 		guard !SharedSettings.geminiAPIKey.isEmpty else {
 			showRequestError(title: "Gemini API key missing", detail: "MemeforgeGeminiAPIKey is empty in this build.")
 			return
@@ -1760,7 +1863,7 @@ private final class MemeForgeModel {
 		isLoading = true
 		showingHistory = false
 		pendingGenerationCount = generatedStyles.count
-		let assets = selectedGenerationAssets
+		let assets = assetsOverride ?? selectedGenerationAssets
 		recordSelectedGenerationAssetUses(assets)
 
 		currentTask = Task { [weak self] in
@@ -1935,7 +2038,17 @@ private final class MemeForgeModel {
 			}
 
 			let pasteboardType = UTType(mimeType: inlineData.mimeType)?.identifier ?? UTType.png.identifier
-			return .success(MemeResult(title: prompt, previewURL: nil, previewVideoURL: nil, copyURL: nil, imageData: imageData, pasteboardType: pasteboardType))
+			return .success(
+				MemeResult(
+					title: prompt,
+					previewURL: nil,
+					previewVideoURL: nil,
+					copyURL: nil,
+					imageData: imageData,
+					pasteboardType: pasteboardType,
+					generationAssets: assets
+				)
+			)
 		} catch {
 			return .failure(RequestError(title: "Generation failed", detail: error.localizedDescription))
 		}
@@ -2086,6 +2199,17 @@ private enum MemeMode: String, CaseIterable, Identifiable, Sendable {
 	}
 }
 
+private enum GeneratedPromptMode: String, CaseIterable, Identifiable, Sendable {
+	case reroll
+	case update
+
+	var id: Self { self }
+
+	var title: String {
+		rawValue
+	}
+}
+
 private struct MemeResult: Identifiable, Hashable, Sendable {
 	let id = UUID()
 	let title: String
@@ -2094,6 +2218,7 @@ private struct MemeResult: Identifiable, Hashable, Sendable {
 	let copyURL: URL?
 	let imageData: Data?
 	let pasteboardType: String
+	let generationAssets: [SelectedGenerationAsset]
 	let useCount: Int
 
 	var historyKey: String? {
@@ -2107,6 +2232,7 @@ private struct MemeResult: Identifiable, Hashable, Sendable {
 		copyURL: URL?,
 		imageData: Data?,
 		pasteboardType: String,
+		generationAssets: [SelectedGenerationAsset] = [],
 		useCount: Int = 0
 	) {
 		self.title = title
@@ -2115,6 +2241,7 @@ private struct MemeResult: Identifiable, Hashable, Sendable {
 		self.copyURL = copyURL
 		self.imageData = imageData
 		self.pasteboardType = pasteboardType
+		self.generationAssets = generationAssets
 		self.useCount = useCount
 	}
 
@@ -2156,6 +2283,7 @@ private struct MemeResult: Identifiable, Hashable, Sendable {
 			copyURL: copyURL,
 			imageData: imageData,
 			pasteboardType: pasteboardType,
+			generationAssets: generationAssets,
 			useCount: useCount
 		)
 	}
