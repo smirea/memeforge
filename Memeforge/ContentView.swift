@@ -211,7 +211,6 @@ private struct MemeForgeView: View {
 
 	private var inputArea: some View {
 		VStack(alignment: .leading, spacing: 10) {
-			queryInputArea
 			if model.mode == .generate, !model.selectedGenerationAssets.isEmpty {
 				SelectedGenerationAssetsStrip(
 					assets: model.selectedGenerationAssets,
@@ -223,6 +222,7 @@ private struct MemeForgeView: View {
 					}
 				)
 			}
+			queryInputArea
 		}
 		.onChange(of: pickerItems) { _, items in
 			importPickerItems(items)
