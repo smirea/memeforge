@@ -53,10 +53,10 @@ Native iOS apps do not have React-style hot reload. After Swift or asset changes
 
 ## Screenshots
 
-| Keyboard search in Messages: `disappear homer` | Keyboard generate in Messages: `these two epic arm wrestling like meme with Arnold in predator` |
+| Keyboard search in Messages: `disappear homer` | Keyboard generate in Messages: `Use these two selected photos as the arm wrestlers in an epic Arnold Predator handshake meme` |
 | --- | --- |
 | <img src="docs/screenshots/keyboard-search.png" alt="Memeforge keyboard search tab in Messages showing results for disappear homer" width="360"> | <img src="docs/screenshots/keyboard-generate.png" alt="Memeforge keyboard generate tab in Messages showing two generated arm wrestling meme styles" width="360"> |
 
-| App collection: three source photos, two selected | App generate: `these two epic arm wrestling like meme with Arnold in predator` |
+| App generate gallery before submitting | App generate: `Use these two selected photos as the arm wrestlers in an epic Arnold Predator handshake meme` |
 | --- | --- |
-| <img src="docs/screenshots/app-collection.jpg" alt="Memeforge app collection showing three imported source photos with two selected" width="360"> | <img src="docs/screenshots/app-generate.jpg" alt="Memeforge app showing a generated Arnold and Predator arm wrestling meme" width="360"> |
+| <img src="docs/screenshots/app-collection.jpg" alt="Memeforge app generate gallery showing two selected source photos and the prompt before submitting" width="360"> | <img src="docs/screenshots/app-generate.jpg" alt="Memeforge app showing the selected source people in a generated arm wrestling meme" width="360"> |
