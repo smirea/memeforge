@@ -13,8 +13,10 @@ struct ContentView: View {
 	var body: some View {
 		NavigationStack {
 			VStack(spacing: 0) {
-				AppHeader(title: showsSettings ? "Settings" : "Memeforge", settingsActive: showsSettings) {
-					toggleMode()
+				if showsSettings || !model.usesGeneratedStage {
+					AppHeader(title: showsSettings ? "Settings" : "Memeforge", settingsActive: showsSettings) {
+						toggleMode()
+					}
 				}
 
 				if showsSettings {
@@ -103,10 +105,75 @@ private struct MemeForgeView: View {
 	@Bindable var model: MemeForgeModel
 	@State private var pickerItems: [PhotosPickerItem] = []
 	@State private var fullScreenPreview: FullScreenPreviewItem?
+	@State private var visibleGeneratedResultID: UUID?
 	@FocusState private var inputFocused: Bool
 
 	var body: some View {
 		VStack(spacing: 0) {
+			mainContent
+			.safeAreaInset(edge: .bottom, spacing: 0) {
+				bottomControls
+				.padding(.horizontal, 16)
+				.padding(.top, 10)
+				.padding(.bottom, 8)
+			}
+			.overlay(alignment: .bottom) {
+				if let statusMessage = model.statusMessage {
+					Text(statusMessage)
+						.font(.subheadline.weight(.semibold))
+						.foregroundStyle(.white)
+						.padding(.horizontal, 16)
+						.padding(.vertical, 10)
+						.background(.black.opacity(0.76), in: Capsule())
+						.padding(.bottom, 16)
+						.transition(.move(edge: .bottom).combined(with: .opacity))
+				}
+			}
+		}
+		.animation(.snappy, value: model.statusMessage)
+		.onAppear {
+			model.refreshHistoryIfNeeded()
+			model.refreshGenerationAssetCollection()
+		}
+		.onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+			model.refreshHistoryIfNeeded()
+			model.refreshGenerationAssetCollection()
+		}
+		.onChange(of: model.results.map(\.id)) { _, ids in
+			updateVisibleGeneratedResult(for: ids)
+		}
+		.fullScreenCover(item: $fullScreenPreview) { item in
+			FullScreenImagePreview(
+				item: item,
+				selection: previewSelectionAction(for: item),
+				delete: item.canDelete ? {
+					deletePreviewItem(item)
+				} : nil,
+				close: {
+					fullScreenPreview = nil
+				}
+			) {
+				copyPreviewItem(item)
+				fullScreenPreview = nil
+			}
+		}
+	}
+
+	@ViewBuilder
+	private var mainContent: some View {
+		if model.usesGeneratedStage {
+			GeneratedResultsStage(
+				results: model.results,
+				isLoading: model.isLoading,
+				requestError: model.requestError,
+				currentID: $visibleGeneratedResultID,
+				copy: {
+					if let result = currentGeneratedResult {
+						model.copy(result)
+					}
+				}
+			)
+		} else {
 			ScrollView {
 				VStack(alignment: .leading, spacing: 16) {
 					if model.mode == .generate, !model.generationAssetCollection.isEmpty {
@@ -141,48 +208,6 @@ private struct MemeForgeView: View {
 				.padding(.vertical, 16)
 			}
 			.scrollDismissesKeyboard(.interactively)
-			.safeAreaInset(edge: .bottom, spacing: 0) {
-				bottomControls
-				.padding(.horizontal, 16)
-				.padding(.top, 10)
-				.padding(.bottom, 8)
-			}
-			.overlay(alignment: .bottom) {
-				if let statusMessage = model.statusMessage {
-					Text(statusMessage)
-						.font(.subheadline.weight(.semibold))
-						.foregroundStyle(.white)
-						.padding(.horizontal, 16)
-						.padding(.vertical, 10)
-						.background(.black.opacity(0.76), in: Capsule())
-						.padding(.bottom, 16)
-						.transition(.move(edge: .bottom).combined(with: .opacity))
-				}
-			}
-		}
-		.animation(.snappy, value: model.statusMessage)
-		.onAppear {
-			model.refreshHistoryIfNeeded()
-			model.refreshGenerationAssetCollection()
-		}
-		.onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
-			model.refreshHistoryIfNeeded()
-			model.refreshGenerationAssetCollection()
-		}
-		.fullScreenCover(item: $fullScreenPreview) { item in
-			FullScreenImagePreview(
-				item: item,
-				selection: previewSelectionAction(for: item),
-				delete: item.canDelete ? {
-					deletePreviewItem(item)
-				} : nil,
-				close: {
-					fullScreenPreview = nil
-				}
-			) {
-				copyPreviewItem(item)
-				fullScreenPreview = nil
-			}
 		}
 	}
 
@@ -204,8 +229,12 @@ private struct MemeForgeView: View {
 
 	private var bottomControlsContent: some View {
 		VStack(alignment: .leading, spacing: 10) {
-			inputArea
-			ModeTabs(mode: $model.mode)
+			if model.usesGeneratedStage {
+				queryInputArea(showAssetPicker: false)
+			} else {
+				inputArea
+				ModeTabs(mode: $model.mode)
+			}
 		}
 	}
 
@@ -222,7 +251,7 @@ private struct MemeForgeView: View {
 					}
 				)
 			}
-			queryInputArea
+			queryInputArea(showAssetPicker: true)
 		}
 		.onChange(of: pickerItems) { _, items in
 			importPickerItems(items)
@@ -230,9 +259,10 @@ private struct MemeForgeView: View {
 		}
 	}
 
-	private var queryInputArea: some View {
+	private func queryInputArea(showAssetPicker: Bool) -> some View {
 		VStack(alignment: .leading, spacing: 10) {
 			HStack(alignment: .center, spacing: 10) {
+				let showsInlineGenerateButton = model.mode == .generate
 				ZStack(alignment: .trailing) {
 					TextField(model.mode.placeholder, text: $model.query, axis: .vertical)
 						.lineLimit(1...5)
@@ -253,23 +283,38 @@ private struct MemeForgeView: View {
 						}
 
 					if !model.query.isEmpty {
-						Button {
-							model.clearQuery()
-							inputFocused = true
-						} label: {
-							Image(systemName: "xmark.circle.fill")
-								.font(.body)
-								.foregroundStyle(.secondary)
-								.frame(width: 36, height: 36)
+						if showsInlineGenerateButton {
+							Button {
+								submitQuery()
+							} label: {
+								Image(systemName: "arrow.up.circle.fill")
+									.font(.title3.weight(.semibold))
+									.foregroundStyle(model.isLoading ? .secondary : Color.accentColor)
+									.frame(width: 36, height: 36)
+							}
+							.buttonStyle(.plain)
+							.disabled(model.isLoading)
+							.padding(.trailing, 6)
+							.accessibilityLabel("Generate")
+						} else {
+							Button {
+								model.clearQuery()
+								inputFocused = true
+							} label: {
+								Image(systemName: "xmark.circle.fill")
+									.font(.body)
+									.foregroundStyle(.secondary)
+									.frame(width: 36, height: 36)
+							}
+							.buttonStyle(.plain)
+							.padding(.trailing, 6)
+							.accessibilityLabel("Clear")
 						}
-						.buttonStyle(.plain)
-						.padding(.trailing, 6)
-						.accessibilityLabel("Clear")
 					}
 				}
 				.liquidGlassSurface(cornerRadius: 22, interactive: true)
 
-				if model.mode == .generate {
+				if model.mode == .generate, showAssetPicker {
 					PhotosPicker(selection: $pickerItems, maxSelectionCount: nil, matching: .images) {
 						Image(systemName: "photo.stack")
 							.font(.title3.weight(.semibold))
@@ -293,6 +338,21 @@ private struct MemeForgeView: View {
 		guard value.rangeOfCharacter(from: .newlines) != nil else { return }
 		model.query = value.components(separatedBy: .newlines).joined(separator: " ")
 		submitQuery()
+	}
+
+	private var currentGeneratedResult: MemeResult? {
+		guard model.mode == .generate else { return nil }
+		if let visibleGeneratedResultID,
+			let visible = model.results.first(where: { $0.id == visibleGeneratedResultID })
+		{
+			return visible
+		}
+		return model.results.last
+	}
+
+	private func updateVisibleGeneratedResult(for ids: [UUID]) {
+		guard model.mode == .generate else { return }
+		visibleGeneratedResultID = ids.last
 	}
 
 	private func importPickerItems(_ items: [PhotosPickerItem]) {
@@ -422,6 +482,118 @@ private struct LoadingTilesGrid: View {
 				}
 			}
 		}
+	}
+}
+
+private struct GeneratedResultsStage: View {
+	let results: [MemeResult]
+	let isLoading: Bool
+	let requestError: RequestError?
+	@Binding var currentID: UUID?
+	let copy: () -> Void
+
+	var body: some View {
+		ZStack {
+			Color.black
+				.ignoresSafeArea()
+
+			if results.isEmpty {
+				VStack(spacing: 14) {
+					ProgressView()
+						.tint(.white)
+					Text(isLoading ? "Generating" : "No image yet")
+						.font(.headline.weight(.semibold))
+						.foregroundStyle(.white)
+					if let requestError {
+						Text(requestError.detail)
+							.font(.footnote.weight(.medium))
+							.foregroundStyle(.white.opacity(0.72))
+							.multilineTextAlignment(.center)
+							.padding(.horizontal, 28)
+					}
+				}
+				.frame(maxWidth: .infinity, maxHeight: .infinity)
+			} else {
+				TabView(selection: $currentID) {
+					ForEach(results) { result in
+						GeneratedImagePage(result: result)
+							.tag(Optional(result.id))
+					}
+				}
+				.tabViewStyle(.page(indexDisplayMode: results.count > 1 ? .automatic : .never))
+				.indexViewStyle(.page(backgroundDisplayMode: .always))
+
+				if let requestError, !isLoading {
+					Text(requestError.title)
+						.font(.subheadline.weight(.semibold))
+						.foregroundStyle(.white)
+						.padding(.horizontal, 14)
+						.padding(.vertical, 9)
+						.background(.red.opacity(0.82), in: Capsule())
+						.padding(.top, 78)
+						.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+				}
+			}
+
+			VStack {
+				HStack {
+					Spacer()
+					Button(action: copy) {
+						Image(systemName: "doc.on.doc.fill")
+							.font(.title3.weight(.bold))
+							.foregroundStyle(.white)
+							.frame(width: 56, height: 56)
+							.background(.black.opacity(0.62), in: Circle())
+							.overlay {
+								Circle()
+									.stroke(.white.opacity(0.24), lineWidth: 1)
+							}
+					}
+					.buttonStyle(.plain)
+					.contentShape(Circle())
+					.disabled(results.isEmpty)
+					.opacity(results.isEmpty ? 0 : 1)
+					.accessibilityLabel("Copy generated image")
+				}
+				Spacer()
+			}
+			.padding(.horizontal, 16)
+			.padding(.top, 12)
+		}
+		.onAppear {
+			currentID = currentID ?? results.last?.id
+		}
+		.onChange(of: results.map(\.id)) { _, ids in
+			currentID = ids.last
+		}
+		.animation(.snappy, value: results.map(\.id))
+	}
+}
+
+private struct GeneratedImagePage: View {
+	let result: MemeResult
+
+	var body: some View {
+		ZStack {
+			Color.black
+
+			if let image {
+				Image(uiImage: image)
+					.resizable()
+					.scaledToFit()
+					.frame(maxWidth: .infinity, maxHeight: .infinity)
+					.padding(.horizontal, 10)
+			} else {
+				Image(systemName: "photo")
+					.font(.largeTitle)
+					.foregroundStyle(.white.opacity(0.5))
+			}
+		}
+	}
+
+	private var image: UIImage? {
+		guard let data = result.imageData else { return nil }
+		return UIImage.animatedGIF(data: data) ?? UIImage(data: data)
 	}
 }
 
@@ -1293,8 +1465,13 @@ private final class MemeForgeModel {
 	var query = "" {
 		didSet {
 			guard oldValue != query else { return }
-			resetResults()
-			refreshHistoryIfNeeded()
+			switch mode {
+			case .search:
+				resetResults()
+				refreshHistoryIfNeeded()
+			case .generate:
+				requestError = nil
+			}
 		}
 	}
 	var results: [MemeResult] = []
@@ -1307,6 +1484,9 @@ private final class MemeForgeModel {
 	var copiedResultID: UUID?
 	var selectedGenerationAssetCollectionIDs: Set<UUID> {
 		Set(selectedGenerationAssets.compactMap(\.collectionID))
+	}
+	var usesGeneratedStage: Bool {
+		mode == .generate && (isLoading || !results.isEmpty)
 	}
 	var hasTiledContent: Bool {
 		!results.isEmpty || isLoading || (mode == .generate && !generationAssetCollection.isEmpty)
@@ -1580,7 +1760,6 @@ private final class MemeForgeModel {
 		isLoading = true
 		showingHistory = false
 		pendingGenerationCount = generatedStyles.count
-		results = []
 		let assets = selectedGenerationAssets
 		recordSelectedGenerationAssetUses(assets)
 
@@ -1591,6 +1770,7 @@ private final class MemeForgeModel {
 
 	private func generateResults(for prompt: String, assets: [SelectedGenerationAsset], generationID: UUID) async {
 		var firstError: RequestError?
+		var didGenerate = false
 
 		await withTaskGroup(of: Result<MemeResult, RequestError>.self) { group in
 			for style in generatedStyles {
@@ -1605,6 +1785,7 @@ private final class MemeForgeModel {
 				switch generated {
 				case .success(let result):
 					results.append(result)
+					didGenerate = true
 				case .failure(let error):
 					firstError = firstError ?? error
 				}
@@ -1614,7 +1795,7 @@ private final class MemeForgeModel {
 		guard self.generationID == generationID else { return }
 		isLoading = false
 		pendingGenerationCount = 0
-		if results.isEmpty {
+		if !didGenerate {
 			requestError = firstError ?? RequestError(title: "Generation failed", detail: "No image data came back from Gemini.")
 		}
 	}
