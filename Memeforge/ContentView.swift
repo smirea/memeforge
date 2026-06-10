@@ -9,6 +9,7 @@ import VisionKit
 struct ContentView: View {
 	@State private var model = MemeForgeModel()
 	@State private var showsSettings = SharedSettings.appShowsSettings
+	@State private var appearanceTheme = SharedSettings.appearanceTheme
 
 	var body: some View {
 		NavigationStack {
@@ -20,11 +21,13 @@ struct ContentView: View {
 				}
 
 				if showsSettings {
-					SettingsView()
+					SettingsView(appearanceTheme: $appearanceTheme)
 				} else {
 					MemeForgeView(model: model)
 				}
 			}
+			.frame(maxWidth: .infinity, maxHeight: .infinity)
+			.background(Color(.systemBackground).ignoresSafeArea())
 			.toolbar(.hidden, for: .navigationBar)
 			.onOpenURL { url in
 				if url.host == "setup" || url.path == "/setup" {
@@ -32,6 +35,7 @@ struct ContentView: View {
 				}
 			}
 		}
+		.preferredColorScheme(appearanceTheme.colorScheme)
 	}
 
 	private func toggleMode() {
@@ -97,6 +101,19 @@ private extension View {
 					RoundedRectangle(cornerRadius: cornerRadius)
 						.stroke(.white.opacity(0.25), lineWidth: 1)
 				}
+		}
+	}
+}
+
+private extension SharedSettings.AppearanceTheme {
+	var colorScheme: ColorScheme? {
+		switch self {
+		case .light:
+			.light
+		case .dark:
+			.dark
+		case .auto:
+			nil
 		}
 	}
 }
@@ -186,11 +203,11 @@ private struct MemeForgeView: View {
 		} else if model.mode == .history {
 			GenerationHistoryFeed(
 				sections: model.generationHistorySections,
-				copyPrompt: { item in
-					model.copyGenerationHistoryPrompt(item)
+				copyPrompt: { step in
+					model.copyGenerationHistoryPrompt(step)
 				},
-				copyAsset: { asset in
-					model.copyGenerationHistoryAsset(asset)
+				openAsset: { asset in
+					openGenerationHistoryAsset(asset)
 				}
 			)
 		} else {
@@ -372,7 +389,6 @@ private struct MemeForgeView: View {
 	private func setGeneratedPromptMode(_ mode: GeneratedPromptMode) {
 		generatedPromptMode = mode
 		syncGeneratedPromptWithVisibleResult(forceReroll: false)
-		inputFocused = true
 	}
 
 	private func syncGeneratedPromptWithVisibleResult(forceReroll: Bool) {
@@ -424,6 +440,11 @@ private struct MemeForgeView: View {
 		fullScreenPreview = .collectionAsset(item, imageData: data)
 	}
 
+	private func openGenerationHistoryAsset(_ asset: SharedSettings.GenerationHistoryAsset) {
+		guard let data = SharedSettings.generationHistoryData(for: asset) else { return }
+		fullScreenPreview = .historyAsset(asset, imageData: data)
+	}
+
 	private func previewSelectionAction(for item: FullScreenPreviewItem) -> PreviewSelectionAction? {
 		guard let collectionID = item.collectionID else { return nil }
 		return PreviewSelectionAction(
@@ -447,6 +468,8 @@ private struct MemeForgeView: View {
 					model.deleteCollectionGenerationAsset(id: collectionID)
 				}
 			}
+		case .historyAsset:
+			break
 		}
 	}
 
@@ -455,6 +478,8 @@ private struct MemeForgeView: View {
 		case .result(let result):
 			model.copy(result)
 		case .asset(_, _, _, _, let imageData, let pasteboardType):
+			model.copyImageData(imageData, pasteboardType: pasteboardType)
+		case .historyAsset(_, _, let imageData, let pasteboardType):
 			model.copyImageData(imageData, pasteboardType: pasteboardType)
 		}
 	}
@@ -532,8 +557,8 @@ private struct LoadingTilesGrid: View {
 
 private struct GenerationHistoryFeed: View {
 	let sections: [GenerationHistorySection]
-	let copyPrompt: (SharedSettings.GenerationHistoryItem) -> Void
-	let copyAsset: (SharedSettings.GenerationHistoryAsset) -> Void
+	let copyPrompt: (SharedSettings.GenerationHistoryStep) -> Void
+	let openAsset: (SharedSettings.GenerationHistoryAsset) -> Void
 
 	var body: some View {
 		ScrollView {
@@ -551,7 +576,7 @@ private struct GenerationHistoryFeed: View {
 								.padding(.horizontal, 2)
 
 							ForEach(section.items) { item in
-								GenerationHistoryCard(item: item, copyPrompt: copyPrompt, copyAsset: copyAsset)
+								GenerationHistoryCard(item: item, copyPrompt: copyPrompt, openAsset: openAsset)
 							}
 						}
 					}
@@ -583,43 +608,31 @@ private struct GenerationHistoryFeed: View {
 
 private struct GenerationHistoryCard: View {
 	let item: SharedSettings.GenerationHistoryItem
-	let copyPrompt: (SharedSettings.GenerationHistoryItem) -> Void
-	let copyAsset: (SharedSettings.GenerationHistoryAsset) -> Void
+	let copyPrompt: (SharedSettings.GenerationHistoryStep) -> Void
+	let openAsset: (SharedSettings.GenerationHistoryAsset) -> Void
 
 	var body: some View {
 		VStack(alignment: .leading, spacing: 12) {
 			HStack(alignment: .center, spacing: 8) {
-				Text(createdAtText)
+				Text(updatedAtText)
 					.font(.caption.weight(.semibold))
 					.foregroundStyle(.secondary)
 
 				Spacer()
 
-				Label(imageCountText, systemImage: "sparkles")
+				Label(stepCountText, systemImage: "sparkles")
 					.font(.caption.weight(.semibold))
 					.foregroundStyle(.secondary)
 			}
 
-			Button {
-				copyPrompt(item)
-			} label: {
-				Text(item.prompt)
-					.font(.headline.weight(.semibold))
-					.foregroundStyle(.primary)
-					.multilineTextAlignment(.leading)
-					.frame(maxWidth: .infinity, alignment: .leading)
-					.padding(12)
-					.background(Color(.tertiarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
-			}
-			.buttonStyle(.plain)
-			.accessibilityLabel("Copy prompt")
-			.accessibilityValue(item.prompt)
+			ForEach(Array(item.steps.enumerated()), id: \.element.id) { index, step in
+				GenerationHistoryStepView(step: step, copyPrompt: copyPrompt, openAsset: openAsset)
 
-			if !item.attachments.isEmpty {
-				GenerationHistoryAttachmentRow(assets: item.attachments, copyAsset: copyAsset)
+				if index < item.steps.count - 1 {
+					Divider()
+						.padding(.vertical, 4)
+				}
 			}
-
-			GenerationHistoryImageGrid(assets: item.images, copyAsset: copyAsset)
 		}
 		.padding(12)
 		.background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
@@ -629,65 +642,101 @@ private struct GenerationHistoryCard: View {
 		}
 	}
 
-	private var createdAtText: String {
-		Date(timeIntervalSince1970: item.createdAt).formatted(date: .omitted, time: .shortened)
+	private var updatedAtText: String {
+		Date(timeIntervalSince1970: item.updatedAt).formatted(date: .omitted, time: .shortened)
 	}
 
-	private var imageCountText: String {
-		item.images.count == 1 ? "1 image" : "\(item.images.count) images"
+	private var stepCountText: String {
+		item.steps.count == 1 ? "1 step" : "\(item.steps.count) steps"
 	}
 }
 
-private struct GenerationHistoryAttachmentRow: View {
-	let assets: [SharedSettings.GenerationHistoryAsset]
-	let copyAsset: (SharedSettings.GenerationHistoryAsset) -> Void
+private struct GenerationHistoryStepView: View {
+	let step: SharedSettings.GenerationHistoryStep
+	let copyPrompt: (SharedSettings.GenerationHistoryStep) -> Void
+	let openAsset: (SharedSettings.GenerationHistoryAsset) -> Void
 
 	var body: some View {
-		VStack(alignment: .leading, spacing: 8) {
-			Label("Attachments", systemImage: "paperclip")
-				.font(.caption.weight(.bold))
-				.foregroundStyle(.secondary)
+		VStack(alignment: .leading, spacing: 10) {
+			HStack(alignment: .top, spacing: 10) {
+				Button {
+					copyPrompt(step)
+				} label: {
+					Text(step.prompt)
+						.font(.headline.weight(.semibold))
+						.foregroundStyle(.primary)
+						.multilineTextAlignment(.leading)
+						.frame(maxWidth: .infinity, alignment: .leading)
+						.padding(12)
+						.background(Color(.tertiarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
+				}
+				.buttonStyle(.plain)
+				.accessibilityLabel("Copy prompt")
+				.accessibilityValue(step.prompt)
 
-			ScrollView(.horizontal, showsIndicators: false) {
-				HStack(spacing: 8) {
-					ForEach(assets) { asset in
-						Button {
-							copyAsset(asset)
-						} label: {
-							GenerationHistoryAssetImage(asset: asset)
-								.frame(width: 58, height: 58)
-								.clipShape(RoundedRectangle(cornerRadius: 8))
-						}
-						.buttonStyle(.plain)
-						.accessibilityLabel("Copy attachment")
+				if let attachment = step.attachments.only {
+					Button {
+						openAsset(attachment)
+					} label: {
+						GenerationHistoryAssetImage(asset: attachment, contentMode: .fill)
+							.frame(width: 72, height: 72)
+							.clipShape(RoundedRectangle(cornerRadius: 8))
 					}
+					.buttonStyle(.plain)
+					.accessibilityLabel("Preview source image")
+				}
+			}
+
+			if step.attachments.count > 1 {
+				GenerationHistoryAttachmentCarousel(assets: step.attachments, openAsset: openAsset)
+			}
+
+			GenerationHistoryResultStack(assets: step.images, openAsset: openAsset)
+		}
+	}
+}
+
+private struct GenerationHistoryAttachmentCarousel: View {
+	let assets: [SharedSettings.GenerationHistoryAsset]
+	let openAsset: (SharedSettings.GenerationHistoryAsset) -> Void
+
+	var body: some View {
+		ScrollView(.horizontal, showsIndicators: false) {
+			HStack(spacing: 8) {
+				ForEach(assets) { asset in
+					Button {
+						openAsset(asset)
+					} label: {
+						GenerationHistoryAssetImage(asset: asset, contentMode: .fill)
+							.frame(width: 76, height: 76)
+							.clipShape(RoundedRectangle(cornerRadius: 8))
+					}
+					.buttonStyle(.plain)
+					.accessibilityLabel("Preview source image")
 				}
 			}
 		}
 	}
 }
 
-private struct GenerationHistoryImageGrid: View {
+private struct GenerationHistoryResultStack: View {
 	let assets: [SharedSettings.GenerationHistoryAsset]
-	let copyAsset: (SharedSettings.GenerationHistoryAsset) -> Void
-
-	private let columns = [
-		GridItem(.flexible(), spacing: 8),
-		GridItem(.flexible(), spacing: 8),
-	]
+	let openAsset: (SharedSettings.GenerationHistoryAsset) -> Void
 
 	var body: some View {
-		LazyVGrid(columns: columns, spacing: 8) {
+		VStack(spacing: 10) {
 			ForEach(assets) { asset in
 				Button {
-					copyAsset(asset)
+					openAsset(asset)
 				} label: {
-					GenerationHistoryAssetImage(asset: asset)
+					GenerationHistoryAssetImage(asset: asset, contentMode: .fit)
 						.aspectRatio(1, contentMode: .fit)
+						.frame(maxWidth: .infinity)
+						.background(Color(.tertiarySystemBackground), in: RoundedRectangle(cornerRadius: 8))
 						.clipShape(RoundedRectangle(cornerRadius: 8))
 				}
 				.buttonStyle(.plain)
-				.accessibilityLabel("Copy generated image")
+				.accessibilityLabel("Preview generated image")
 			}
 		}
 	}
@@ -695,6 +744,7 @@ private struct GenerationHistoryImageGrid: View {
 
 private struct GenerationHistoryAssetImage: View {
 	let asset: SharedSettings.GenerationHistoryAsset
+	let contentMode: ContentMode
 	@State private var image: UIImage?
 
 	var body: some View {
@@ -704,7 +754,7 @@ private struct GenerationHistoryAssetImage: View {
 			if let image {
 				Image(uiImage: image)
 					.resizable()
-					.scaledToFill()
+					.aspectRatio(contentMode: contentMode)
 			} else {
 				Image(systemName: "photo")
 					.font(.title3)
@@ -767,6 +817,22 @@ private struct GeneratedResultsStage: View {
 						.background(.red.opacity(0.82), in: Capsule())
 						.padding(.top, 78)
 						.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+				}
+
+				if isLoading {
+					HStack(spacing: 8) {
+						ProgressView()
+							.controlSize(.small)
+							.tint(.white)
+						Text("Generating")
+							.font(.subheadline.weight(.semibold))
+							.foregroundStyle(.white)
+					}
+					.padding(.horizontal, 14)
+					.padding(.vertical, 9)
+					.background(.black.opacity(0.72), in: Capsule())
+					.padding(.top, 78)
+					.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
 				}
 			}
 
@@ -850,6 +916,7 @@ private struct GeneratedPromptModeSwitch: View {
 		}
 		.padding(4)
 		.liquidGlassSurface(cornerRadius: 19, interactive: true)
+		.animation(.snappy, value: mode)
 	}
 }
 
@@ -1117,6 +1184,12 @@ private enum FullScreenPreviewItem: Identifiable {
 		imageData: Data,
 		pasteboardType: String
 	)
+	case historyAsset(
+		id: UUID,
+		title: String,
+		imageData: Data,
+		pasteboardType: String
+	)
 
 	var id: String {
 		switch self {
@@ -1124,6 +1197,8 @@ private enum FullScreenPreviewItem: Identifiable {
 			"result-\(result.id.uuidString)"
 		case .asset(let id, _, _, _, _, _):
 			"asset-\(id.uuidString)"
+		case .historyAsset(let id, _, _, _):
+			"history-asset-\(id.uuidString)"
 		}
 	}
 
@@ -1133,12 +1208,14 @@ private enum FullScreenPreviewItem: Identifiable {
 			result.title.isEmpty ? "Meme" : result.title
 		case .asset(_, _, _, let title, _, _):
 			title
+		case .historyAsset(_, let title, _, _):
+			title
 		}
 	}
 
 	var collectionID: UUID? {
 		switch self {
-		case .result:
+		case .result, .historyAsset:
 			nil
 		case .asset(_, let collectionID, _, _, _, _):
 			collectionID
@@ -1151,6 +1228,8 @@ private enum FullScreenPreviewItem: Identifiable {
 			result.useCount > 0
 		case .asset:
 			true
+		case .historyAsset:
+			false
 		}
 	}
 
@@ -1160,6 +1239,8 @@ private enum FullScreenPreviewItem: Identifiable {
 			result.imageData
 		case .asset(_, _, _, _, let imageData, _):
 			imageData
+		case .historyAsset(_, _, let imageData, _):
+			imageData
 		}
 	}
 
@@ -1167,7 +1248,7 @@ private enum FullScreenPreviewItem: Identifiable {
 		switch self {
 		case .result(let result):
 			result.previewURL ?? result.copyURL
-		case .asset:
+		case .asset, .historyAsset:
 			nil
 		}
 	}
@@ -1191,6 +1272,15 @@ private enum FullScreenPreviewItem: Identifiable {
 			title: "Saved generation asset",
 			imageData: imageData,
 			pasteboardType: UTType(mimeType: item.mimeType)?.identifier ?? item.mimeType
+		)
+	}
+
+	static func historyAsset(_ asset: SharedSettings.GenerationHistoryAsset, imageData: Data) -> FullScreenPreviewItem {
+		.historyAsset(
+			id: asset.id,
+			title: "Generation history image",
+			imageData: imageData,
+			pasteboardType: UTType(mimeType: asset.mimeType)?.identifier ?? asset.mimeType
 		)
 	}
 }
@@ -1598,6 +1688,7 @@ private struct RequestErrorView: View {
 
 private struct SettingsView: View {
 	@Environment(\.scenePhase) private var scenePhase
+	@Binding var appearanceTheme: SharedSettings.AppearanceTheme
 	@State private var keyboardHasFullAccess = SharedSettings.keyboardHasFullAccess
 	@State private var keyboardTest = ""
 	@State private var copiedImage: UIImage?
@@ -1608,6 +1699,16 @@ private struct SettingsView: View {
 
 	var body: some View {
 		Form {
+			Section("Theme") {
+				Picker("Theme", selection: $appearanceTheme) {
+					ForEach(SharedSettings.AppearanceTheme.allCases) { theme in
+						Text(theme.title)
+							.tag(theme)
+					}
+				}
+				.pickerStyle(.segmented)
+			}
+
 			if !keyboardHasFullAccess {
 				Section("Full Access") {
 					Button("Open Settings") {
@@ -1641,6 +1742,8 @@ private struct SettingsView: View {
 				LabeledContent("Model", value: SharedSettings.geminiModel)
 			}
 		}
+		.scrollContentBackground(.hidden)
+		.background(Color(.systemBackground).ignoresSafeArea())
 		.onAppear {
 			refreshPermissionState()
 			refreshCopiedImage(force: true)
@@ -1657,6 +1760,9 @@ private struct SettingsView: View {
 				refreshPermissionState()
 				refreshCopiedImage(force: true)
 			}
+		}
+		.onChange(of: appearanceTheme) { _, theme in
+			SharedSettings.appearanceTheme = theme
 		}
 	}
 
@@ -1775,13 +1881,13 @@ private final class MemeForgeModel {
 	var generationHistorySections: [GenerationHistorySection] {
 		let calendar = Calendar.current
 		let grouped = Dictionary(grouping: generationHistory) { item in
-			calendar.startOfDay(for: Date(timeIntervalSince1970: item.createdAt))
+			calendar.startOfDay(for: Date(timeIntervalSince1970: item.updatedAt))
 		}
 		return grouped.keys.sorted(by: >).map { day in
 			GenerationHistorySection(
 				date: day,
 				title: Self.historySectionTitle(for: day),
-				items: grouped[day]?.sorted { $0.createdAt > $1.createdAt } ?? []
+				items: grouped[day]?.sorted { $0.updatedAt > $1.updatedAt } ?? []
 			)
 		}
 	}
@@ -1837,7 +1943,11 @@ private final class MemeForgeModel {
 
 		switch mode {
 		case .reroll:
-			generate(trimmed, assetsOverride: sourceResult?.generationAssets ?? selectedGenerationAssets)
+			generate(
+				trimmed,
+				assetsOverride: sourceResult?.generationAssets ?? selectedGenerationAssets,
+				historyID: sourceResult?.generationHistoryID
+			)
 		case .update:
 			guard let sourceResult, let imageData = sourceResult.imageData else {
 				showRequestError(title: "No generated image", detail: "Generate an image before updating it.")
@@ -1845,7 +1955,7 @@ private final class MemeForgeModel {
 			}
 			let mimeType = UTType(sourceResult.pasteboardType)?.preferredMIMEType ?? "image/png"
 			let asset = SelectedGenerationAsset(collectionID: nil, imageData: imageData, mimeType: mimeType, useCount: 0)
-			generate(trimmed, assetsOverride: [asset])
+			generate(trimmed, assetsOverride: [asset], historyID: sourceResult.generationHistoryID)
 		}
 	}
 
@@ -2006,18 +2116,9 @@ private final class MemeForgeModel {
 		showStatus("Copied")
 	}
 
-	func copyGenerationHistoryPrompt(_ item: SharedSettings.GenerationHistoryItem) {
-		UIPasteboard.general.string = item.prompt
+	func copyGenerationHistoryPrompt(_ step: SharedSettings.GenerationHistoryStep) {
+		UIPasteboard.general.string = step.prompt
 		showStatus("Copied prompt")
-	}
-
-	func copyGenerationHistoryAsset(_ asset: SharedSettings.GenerationHistoryAsset) {
-		guard let data = SharedSettings.generationHistoryData(for: asset) else {
-			showStatus("Missing image")
-			return
-		}
-		let pasteboardType = UTType(mimeType: asset.mimeType)?.identifier ?? asset.mimeType
-		copyImageData(data, pasteboardType: pasteboardType)
 	}
 
 	private func resetResults() {
@@ -2086,15 +2187,16 @@ private final class MemeForgeModel {
 		}
 	}
 
-	private func generate(_ trimmed: String, assetsOverride: [SelectedGenerationAsset]? = nil) {
+	private func generate(_ trimmed: String, assetsOverride: [SelectedGenerationAsset]? = nil, historyID: UUID? = nil) {
 		guard !SharedSettings.geminiAPIKey.isEmpty else {
 			showRequestError(title: "Gemini API key missing", detail: "MemeforgeGeminiAPIKey is empty in this build.")
 			return
 		}
 
 		currentTask?.cancel()
-		let generationID = UUID()
-		self.generationID = generationID
+		let requestID = UUID()
+		let historyID = historyID ?? UUID()
+		generationID = requestID
 		searchQuery = ""
 		searchOffset = 0
 		canLoadMoreSearchResults = false
@@ -2105,20 +2207,25 @@ private final class MemeForgeModel {
 		recordSelectedGenerationAssetUses(assets)
 
 		currentTask = Task { [weak self] in
-			await self?.generateResults(for: trimmed, assets: assets, generationID: generationID)
+			await self?.generateResults(for: trimmed, assets: assets, requestID: requestID, historyID: historyID)
 		}
 	}
 
-	private func generateResults(for prompt: String, assets: [SelectedGenerationAsset], generationID: UUID) async {
-		let generated = await Self.geminiResult(for: prompt, instruction: generationInstruction, assets: assets)
-		guard self.generationID == generationID else { return }
+	private func generateResults(for prompt: String, assets: [SelectedGenerationAsset], requestID: UUID, historyID: UUID) async {
+		let generated = await Self.geminiResult(
+			for: prompt,
+			instruction: generationInstruction,
+			assets: assets,
+			historyID: historyID
+		)
+		guard generationID == requestID else { return }
 		isLoading = false
 		pendingGenerationCount = 0
 
 		switch generated {
 		case .success(let result):
 			results.append(result)
-			recordGenerationHistory(prompt: prompt, assets: assets, results: [result])
+			recordGenerationHistory(historyID: historyID, prompt: prompt, assets: assets, results: [result])
 		case .failure(let error):
 			requestError = error
 		}
@@ -2139,7 +2246,7 @@ private final class MemeForgeModel {
 		}
 	}
 
-	private func recordGenerationHistory(prompt: String, assets: [SelectedGenerationAsset], results: [MemeResult]) {
+	private func recordGenerationHistory(historyID: UUID, prompt: String, assets: [SelectedGenerationAsset], results: [MemeResult]) {
 		let attachments = assets.map { asset in
 			SharedSettings.GenerationAssetPayload(data: asset.imageData, mimeType: asset.mimeType)
 		}
@@ -2148,7 +2255,7 @@ private final class MemeForgeModel {
 			let mimeType = UTType(result.pasteboardType)?.preferredMIMEType ?? "image/png"
 			return SharedSettings.GenerationAssetPayload(data: imageData, mimeType: mimeType)
 		}
-		guard SharedSettings.recordGenerationHistory(prompt: prompt, attachments: attachments, images: images) != nil else { return }
+		guard SharedSettings.recordGenerationHistory(id: historyID, prompt: prompt, attachments: attachments, images: images) != nil else { return }
 		refreshGenerationHistory()
 	}
 
@@ -2257,7 +2364,8 @@ private final class MemeForgeModel {
 	private nonisolated static func geminiResult(
 		for prompt: String,
 		instruction: String,
-		assets: [SelectedGenerationAsset]
+		assets: [SelectedGenerationAsset],
+		historyID: UUID
 	) async -> Result<MemeResult, RequestError> {
 		guard let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(SharedSettings.geminiModel):generateContent") else {
 			return .failure(RequestError(title: "Generation failed", detail: "Could not build the Gemini URL."))
@@ -2295,7 +2403,8 @@ private final class MemeForgeModel {
 					copyURL: nil,
 					imageData: imageData,
 					pasteboardType: pasteboardType,
-					generationAssets: assets
+					generationAssets: assets,
+					generationHistoryID: historyID
 				)
 			)
 		} catch {
@@ -2473,6 +2582,7 @@ private struct MemeResult: Identifiable, Hashable, Sendable {
 	let imageData: Data?
 	let pasteboardType: String
 	let generationAssets: [SelectedGenerationAsset]
+	let generationHistoryID: UUID?
 	let useCount: Int
 
 	var historyKey: String? {
@@ -2487,6 +2597,7 @@ private struct MemeResult: Identifiable, Hashable, Sendable {
 		imageData: Data?,
 		pasteboardType: String,
 		generationAssets: [SelectedGenerationAsset] = [],
+		generationHistoryID: UUID? = nil,
 		useCount: Int = 0
 	) {
 		self.title = title
@@ -2496,6 +2607,7 @@ private struct MemeResult: Identifiable, Hashable, Sendable {
 		self.imageData = imageData
 		self.pasteboardType = pasteboardType
 		self.generationAssets = generationAssets
+		self.generationHistoryID = generationHistoryID
 		self.useCount = useCount
 	}
 
@@ -2538,6 +2650,7 @@ private struct MemeResult: Identifiable, Hashable, Sendable {
 			imageData: imageData,
 			pasteboardType: pasteboardType,
 			generationAssets: generationAssets,
+			generationHistoryID: generationHistoryID,
 			useCount: useCount
 		)
 	}
@@ -2562,6 +2675,12 @@ private struct GenerationHistorySection: Identifiable, Sendable {
 
 	var id: TimeInterval {
 		date.timeIntervalSince1970
+	}
+}
+
+private extension Collection {
+	var only: Element? {
+		count == 1 ? first : nil
 	}
 }
 

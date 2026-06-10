@@ -206,6 +206,7 @@ final class KeyboardViewController: UIInputViewController {
 
 	override func viewDidLoad() {
 		super.viewDidLoad()
+		syncAppearanceOverride()
 		heightConstraint = view.heightAnchor.constraint(equalToConstant: 280)
 		heightConstraint?.isActive = true
 		buildInterface()
@@ -221,6 +222,8 @@ final class KeyboardViewController: UIInputViewController {
 
 	override func viewWillAppear(_ animated: Bool) {
 		super.viewWillAppear(animated)
+		syncAppearanceOverride()
+		applyKeyboardTheme()
 		updatePrompt()
 		showHistoryIfNeeded()
 		refreshGenerationAssetCollection()
@@ -683,15 +686,34 @@ final class KeyboardViewController: UIInputViewController {
 		}
 		shiftKeyButton.setImage(UIImage(systemName: imageName), for: .normal)
 
-		let isDark = traitCollection.userInterfaceStyle == .dark
+		let isDark = usesDarkAppearance
 		let active = shiftState != .lowercase
 		let backgroundColor = active ? (isDark ? UIColor(white: 0.36, alpha: 1) : UIColor.white) : (isDark ? UIColor(white: 0.22, alpha: 1) : UIColor.systemGray3)
 		let tintColor = isDark ? UIColor.white : UIColor.label
 		styleKey(shiftKeyButton, backgroundColor: backgroundColor, tintColor: tintColor, shadow: !isDark && active)
 	}
 
+	private func syncAppearanceOverride() {
+		let style = SharedSettings.appearanceTheme.userInterfaceStyle
+		if overrideUserInterfaceStyle != style {
+			overrideUserInterfaceStyle = style
+		}
+	}
+
+	private var usesDarkAppearance: Bool {
+		switch SharedSettings.appearanceTheme {
+		case .light:
+			false
+		case .dark:
+			true
+		case .auto:
+			traitCollection.userInterfaceStyle == .dark
+		}
+	}
+
 	private func applyKeyboardTheme() {
-		let isDark = traitCollection.userInterfaceStyle == .dark
+		syncAppearanceOverride()
+		let isDark = usesDarkAppearance
 		view.backgroundColor = isDark ? UIColor(white: 0.08, alpha: 1) : UIColor.systemGray5
 		let letterColor = isDark ? UIColor(white: 0.24, alpha: 1) : UIColor.white
 		let systemColor = isDark ? UIColor(white: 0.22, alpha: 1) : UIColor.systemGray3
@@ -714,10 +736,10 @@ final class KeyboardViewController: UIInputViewController {
 		assetToggleButton.tintColor = textColor
 		keyboardRestoreButton.backgroundColor = isDark ? systemColor : .tertiarySystemBackground
 		keyboardRestoreButton.tintColor = textColor
-			closeButton.backgroundColor = isDark ? systemColor : .tertiarySystemBackground
-			closeButton.tintColor = textColor
-			styleAssetPickerButton(addAssetButton, filled: true, isDark: isDark)
-			queryCaret.backgroundColor = .systemBlue
+		closeButton.backgroundColor = isDark ? systemColor : .tertiarySystemBackground
+		closeButton.tintColor = textColor
+		styleAssetPickerButton(addAssetButton, filled: true, isDark: isDark)
+		queryCaret.backgroundColor = .systemBlue
 		queryClearButton.tintColor = isDark ? UIColor(white: 0.75, alpha: 1) : UIColor.secondaryLabel
 		loadingIndicator.color = isDark ? .white : .secondaryLabel
 		applyQueryInputFocus(animated: false)

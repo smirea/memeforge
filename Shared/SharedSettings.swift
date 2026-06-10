@@ -13,8 +13,39 @@ enum SharedSettings {
 	private static let generationHistoryKey = "generationHistory"
 	private static let appShowsSettingsKey = "appShowsSettings"
 	private static let appMemeModeKey = "appMemeMode"
+	private static let appearanceThemeKey = "appearanceTheme"
 	private static let generationAssetMaxSide: CGFloat = 1280
 	private static let generationHistoryMaxCount = 80
+
+	enum AppearanceTheme: String, CaseIterable, Identifiable, Sendable {
+		case light
+		case dark
+		case auto
+
+		var id: Self { self }
+
+		var title: String {
+			switch self {
+			case .light:
+				"Light"
+			case .dark:
+				"Dark"
+			case .auto:
+				"Auto"
+			}
+		}
+
+		var userInterfaceStyle: UIUserInterfaceStyle {
+			switch self {
+			case .light:
+				.light
+			case .dark:
+				.dark
+			case .auto:
+				.unspecified
+			}
+		}
+	}
 
 	struct GiphyMemeHistoryItem: Codable, Equatable {
 		var title: String
@@ -45,12 +76,72 @@ enum SharedSettings {
 		var mimeType: String
 	}
 
-	struct GenerationHistoryItem: Codable, Equatable, Identifiable, Sendable {
+	struct GenerationHistoryStep: Codable, Equatable, Identifiable, Sendable {
 		var id: UUID
 		var prompt: String
 		var createdAt: TimeInterval
 		var attachments: [GenerationHistoryAsset]
 		var images: [GenerationHistoryAsset]
+	}
+
+	struct GenerationHistoryItem: Codable, Equatable, Identifiable, Sendable {
+		var id: UUID
+		var createdAt: TimeInterval
+		var updatedAt: TimeInterval
+		var steps: [GenerationHistoryStep]
+
+		init(id: UUID, createdAt: TimeInterval, updatedAt: TimeInterval, steps: [GenerationHistoryStep]) {
+			self.id = id
+			self.createdAt = createdAt
+			self.updatedAt = updatedAt
+			self.steps = steps
+		}
+
+		init(from decoder: Decoder) throws {
+			let container = try decoder.container(keyedBy: CodingKeys.self)
+			id = try container.decode(UUID.self, forKey: .id)
+
+			if let steps = try container.decodeIfPresent([GenerationHistoryStep].self, forKey: .steps) {
+				self.steps = steps
+				createdAt = try container.decodeIfPresent(TimeInterval.self, forKey: .createdAt)
+					?? steps.first?.createdAt
+					?? 0
+				updatedAt = try container.decodeIfPresent(TimeInterval.self, forKey: .updatedAt)
+					?? steps.last?.createdAt
+					?? createdAt
+				return
+			}
+
+			let createdAt = try container.decode(TimeInterval.self, forKey: .createdAt)
+			let step = GenerationHistoryStep(
+				id: id,
+				prompt: try container.decode(String.self, forKey: .prompt),
+				createdAt: createdAt,
+				attachments: try container.decodeIfPresent([GenerationHistoryAsset].self, forKey: .attachments) ?? [],
+				images: try container.decodeIfPresent([GenerationHistoryAsset].self, forKey: .images) ?? []
+			)
+			self.createdAt = createdAt
+			updatedAt = createdAt
+			steps = [step]
+		}
+
+		func encode(to encoder: Encoder) throws {
+			var container = encoder.container(keyedBy: CodingKeys.self)
+			try container.encode(id, forKey: .id)
+			try container.encode(createdAt, forKey: .createdAt)
+			try container.encode(updatedAt, forKey: .updatedAt)
+			try container.encode(steps, forKey: .steps)
+		}
+
+		private enum CodingKeys: String, CodingKey {
+			case id
+			case createdAt
+			case updatedAt
+			case steps
+			case prompt
+			case attachments
+			case images
+		}
 	}
 
 	static var store: UserDefaults {
@@ -78,6 +169,13 @@ enum SharedSettings {
 	static var appMemeMode: String {
 		get { store.string(forKey: appMemeModeKey) ?? "search" }
 		set { store.set(newValue, forKey: appMemeModeKey) }
+	}
+
+	static var appearanceTheme: AppearanceTheme {
+		get {
+			store.string(forKey: appearanceThemeKey).flatMap(AppearanceTheme.init(rawValue:)) ?? .auto
+		}
+		set { store.set(newValue.rawValue, forKey: appearanceThemeKey) }
 	}
 
 	static var copiedMemePreviewData: Data? {
@@ -117,7 +215,7 @@ enum SharedSettings {
 		else {
 			return []
 		}
-		return history.sorted { $0.createdAt > $1.createdAt }
+		return history.sorted { $0.updatedAt > $1.updatedAt }
 	}
 
 	static func normalizedGenerationAssetPayload(from data: Data) -> GenerationAssetPayload? {
@@ -209,28 +307,50 @@ enum SharedSettings {
 
 	@discardableResult
 	static func recordGenerationHistory(
+		id historyID: UUID,
 		prompt: String,
 		attachments: [GenerationAssetPayload],
 		images: [GenerationAssetPayload]
 	) -> GenerationHistoryItem? {
 		guard !images.isEmpty, let directory = generationHistoryDirectory() else { return nil }
-		let entryID = UUID()
+		let stepID = UUID()
+		let now = Date().timeIntervalSince1970
 		let imageAssets = images.enumerated().compactMap { index, payload in
-			writeGenerationHistoryAsset(entryID: entryID, kind: "image", index: index, payload: payload, directory: directory)
+			writeGenerationHistoryAsset(
+				historyID: historyID,
+				stepID: stepID,
+				kind: "image",
+				index: index,
+				payload: payload,
+				directory: directory
+			)
 		}
 		guard !imageAssets.isEmpty else { return nil }
 
 		let attachmentAssets = attachments.enumerated().compactMap { index, payload in
-			writeGenerationHistoryAsset(entryID: entryID, kind: "attachment", index: index, payload: payload, directory: directory)
+			writeGenerationHistoryAsset(
+				historyID: historyID,
+				stepID: stepID,
+				kind: "attachment",
+				index: index,
+				payload: payload,
+				directory: directory
+			)
 		}
-		let item = GenerationHistoryItem(
-			id: entryID,
+		let step = GenerationHistoryStep(
+			id: stepID,
 			prompt: prompt,
-			createdAt: Date().timeIntervalSince1970,
+			createdAt: now,
 			attachments: attachmentAssets,
 			images: imageAssets
 		)
 		var history = generationHistory
+		let item: GenerationHistoryItem
+		if let existingIndex = history.firstIndex(where: { $0.id == historyID }) {
+			item = history.remove(at: existingIndex).appending(step, updatedAt: now)
+		} else {
+			item = GenerationHistoryItem(id: historyID, createdAt: now, updatedAt: now, steps: [step])
+		}
 		history.insert(item, at: 0)
 		saveGenerationHistory(history)
 		return item
@@ -302,12 +422,14 @@ enum SharedSettings {
 	}
 
 	private static func saveGenerationHistory(_ history: [GenerationHistoryItem]) {
-		let sorted = history.sorted { $0.createdAt > $1.createdAt }
+		let sorted = history.sorted { $0.updatedAt > $1.updatedAt }
 		let trimmed = Array(sorted.prefix(generationHistoryMaxCount))
 		guard let data = try? JSONEncoder().encode(trimmed) else { return }
 		store.set(data, forKey: generationHistoryKey)
 		pruneGenerationHistoryFiles(keeping: Set(trimmed.flatMap { item in
-			(item.attachments + item.images).map(\.filename)
+			item.steps.flatMap { step in
+				(step.attachments + step.images).map(\.filename)
+			}
 		}))
 	}
 
@@ -336,14 +458,15 @@ enum SharedSettings {
 	}
 
 	private static func writeGenerationHistoryAsset(
-		entryID: UUID,
+		historyID: UUID,
+		stepID: UUID,
 		kind: String,
 		index: Int,
 		payload: GenerationAssetPayload,
 		directory: URL
 	) -> GenerationHistoryAsset? {
 		let id = UUID()
-		let filename = "\(entryID.uuidString)-\(kind)-\(index)-\(id.uuidString).\(generationAssetExtension(for: payload.mimeType))"
+		let filename = "\(historyID.uuidString)-\(stepID.uuidString)-\(kind)-\(index)-\(id.uuidString).\(generationAssetExtension(for: payload.mimeType))"
 		let url = directory.appendingPathComponent(filename)
 		do {
 			try payload.data.write(to: url, options: .atomic)
@@ -373,6 +496,15 @@ enum SharedSettings {
 		default:
 			"img"
 		}
+	}
+}
+
+private extension SharedSettings.GenerationHistoryItem {
+	func appending(_ step: SharedSettings.GenerationHistoryStep, updatedAt: TimeInterval) -> Self {
+		var item = self
+		item.steps.append(step)
+		item.updatedAt = updatedAt
+		return item
 	}
 }
 
