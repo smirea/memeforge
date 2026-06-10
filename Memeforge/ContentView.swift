@@ -314,21 +314,22 @@ private struct MemeForgeView: View {
 
 	private func openGenerationAsset(_ item: SharedSettings.GenerationAssetItem) {
 		guard let data = SharedSettings.generationAssetData(for: item) else { return }
-		fullScreenPreview = .asset(
-			id: item.id,
-			collectionID: item.id,
-			title: "Saved generation asset",
-			imageData: data,
-			pasteboardType: UTType(mimeType: item.mimeType)?.identifier ?? item.mimeType
-		)
+		fullScreenPreview = .collectionAsset(item, imageData: data)
 	}
 
 	private func deletePreviewItem(_ item: FullScreenPreviewItem) {
 		switch item {
 		case .result(let result):
 			model.deleteHistoryResult(result)
-		case .asset(let id, let collectionID, _, _, _):
-			model.deleteGenerationAsset(id: id, collectionID: collectionID)
+		case .asset(let id, let collectionID, let deleteTarget, _, _, _):
+			switch deleteTarget {
+			case .selectedThumbnail:
+				model.removeGenerationAsset(id: id)
+			case .collectionItem:
+				if let collectionID {
+					model.deleteCollectionGenerationAsset(id: collectionID)
+				}
+			}
 		}
 	}
 
@@ -336,7 +337,7 @@ private struct MemeForgeView: View {
 		switch item {
 		case .result(let result):
 			model.copy(result)
-		case .asset(_, _, _, let imageData, let pasteboardType):
+		case .asset(_, _, _, _, let imageData, let pasteboardType):
 			model.copyImageData(imageData, pasteboardType: pasteboardType)
 		}
 	}
@@ -510,44 +511,56 @@ private struct GenerationAssetCollectionCell: View {
 	@State private var image: UIImage?
 
 	var body: some View {
-		ZStack(alignment: .topTrailing) {
-			SquareThumbnailTile {
-				if let image {
-					Image(uiImage: image)
-						.resizable()
-						.scaledToFill()
-				} else {
-					Image(systemName: "photo")
-						.font(.title2)
-						.foregroundStyle(.secondary)
+		ZStack(alignment: .bottomTrailing) {
+			Button(action: preview) {
+				ZStack(alignment: .topTrailing) {
+					SquareThumbnailTile {
+						if let image {
+							Image(uiImage: image)
+								.resizable()
+								.scaledToFill()
+						} else {
+							Image(systemName: "photo")
+								.font(.title2)
+								.foregroundStyle(.secondary)
+						}
+					}
+
+					if item.useCount > 0 {
+						Text(item.useCount > 999 ? "999+" : "\(item.useCount)")
+							.font(.caption2.weight(.bold))
+							.foregroundStyle(.white)
+							.padding(.horizontal, 6)
+							.frame(minHeight: 20)
+							.background(.black.opacity(0.68), in: Capsule())
+							.padding(6)
+					}
 				}
 			}
+			.buttonStyle(.plain)
 
-			if item.useCount > 0 {
-				Text(item.useCount > 999 ? "999+" : "\(item.useCount)")
-					.font(.caption2.weight(.bold))
-					.foregroundStyle(.white)
-					.padding(.horizontal, 6)
-					.frame(minHeight: 20)
-					.background(.black.opacity(0.68), in: Capsule())
-					.padding(6)
+			Button(action: select) {
+				Image(systemName: "plus.circle.fill")
+					.font(.title2.weight(.semibold))
+					.foregroundStyle(.white, Color.accentColor)
+					.frame(width: 38, height: 38)
 			}
+			.buttonStyle(.plain)
+			.padding(6)
+			.accessibilityLabel("Use saved generation asset")
 		}
-		.contentShape(Rectangle())
-		.onTapGesture(perform: select)
-		.onLongPressGesture(perform: preview)
 		.task(id: item.id) {
 			image = SharedSettings.generationAssetData(for: item).flatMap(UIImage.init(data:))
 		}
 		.accessibilityElement(children: .ignore)
 		.accessibilityLabel("Saved generation asset")
-		.accessibilityHint("Tap to add. Preview opens fullscreen.")
+		.accessibilityHint("Opens fullscreen preview.")
 		.accessibilityAddTraits(.isButton)
 		.accessibilityAction {
-			select()
-		}
-		.accessibilityAction(named: "Preview") {
 			preview()
+		}
+		.accessibilityAction(named: "Use") {
+			select()
 		}
 	}
 }
@@ -589,15 +602,27 @@ private struct MemeResultCell: View {
 	}
 }
 
+private enum AssetPreviewDeleteTarget {
+	case selectedThumbnail
+	case collectionItem
+}
+
 private enum FullScreenPreviewItem: Identifiable {
 	case result(MemeResult)
-	case asset(id: UUID, collectionID: UUID?, title: String, imageData: Data, pasteboardType: String)
+	case asset(
+		id: UUID,
+		collectionID: UUID?,
+		deleteTarget: AssetPreviewDeleteTarget,
+		title: String,
+		imageData: Data,
+		pasteboardType: String
+	)
 
 	var id: String {
 		switch self {
 		case .result(let result):
 			"result-\(result.id.uuidString)"
-		case .asset(let id, _, _, _, _):
+		case .asset(let id, _, _, _, _, _):
 			"asset-\(id.uuidString)"
 		}
 	}
@@ -606,7 +631,7 @@ private enum FullScreenPreviewItem: Identifiable {
 		switch self {
 		case .result(let result):
 			result.title.isEmpty ? "Meme" : result.title
-		case .asset(_, _, let title, _, _):
+		case .asset(_, _, _, let title, _, _):
 			title
 		}
 	}
@@ -624,7 +649,7 @@ private enum FullScreenPreviewItem: Identifiable {
 		switch self {
 		case .result(let result):
 			result.imageData
-		case .asset(_, _, _, let imageData, _):
+		case .asset(_, _, _, _, let imageData, _):
 			imageData
 		}
 	}
@@ -642,9 +667,21 @@ private enum FullScreenPreviewItem: Identifiable {
 		.asset(
 			id: asset.id,
 			collectionID: asset.collectionID,
+			deleteTarget: .selectedThumbnail,
 			title: "Selected generation asset",
 			imageData: asset.imageData,
 			pasteboardType: UTType(mimeType: asset.mimeType)?.identifier ?? asset.mimeType
+		)
+	}
+
+	static func collectionAsset(_ item: SharedSettings.GenerationAssetItem, imageData: Data) -> FullScreenPreviewItem {
+		.asset(
+			id: item.id,
+			collectionID: item.id,
+			deleteTarget: .collectionItem,
+			title: "Saved generation asset",
+			imageData: imageData,
+			pasteboardType: UTType(mimeType: item.mimeType)?.identifier ?? item.mimeType
 		)
 	}
 }
@@ -663,16 +700,16 @@ private struct FullScreenImagePreview: View {
 			NativePhotoPreview(item: item)
 				.ignoresSafeArea()
 				.accessibilityLabel(item.title)
-		}
-		.safeAreaInset(edge: .top, spacing: 0) {
-			topControls
-				.padding(.horizontal, 24)
-				.padding(.top, 12)
-		}
-		.safeAreaInset(edge: .bottom, spacing: 0) {
-			controls
-				.padding(.horizontal, 24)
-				.padding(.bottom, 12)
+
+			VStack {
+				topControls
+				Spacer()
+				controls
+			}
+			.padding(.horizontal, 24)
+			.padding(.top, 12)
+			.padding(.bottom, 12)
+			.zIndex(1)
 		}
 		.statusBarHidden()
 	}
@@ -1257,9 +1294,12 @@ private final class MemeForgeModel {
 		guard !payloads.isEmpty else { return }
 
 		var assets: [SelectedGenerationAsset] = []
+		var selectedCollectionIDs = Set(selectedGenerationAssets.compactMap(\.collectionID))
 		for payload in payloads {
 			guard let item = SharedSettings.addGenerationAsset(payload) else { continue }
-			assets.append(SelectedGenerationAsset(collectionItem: item, imageData: payload.data))
+			guard selectedCollectionIDs.insert(item.id).inserted else { continue }
+			let data = SharedSettings.generationAssetData(for: item) ?? payload.data
+			assets.append(SelectedGenerationAsset(collectionItem: item, imageData: data))
 		}
 		guard !assets.isEmpty else { return }
 
@@ -1279,18 +1319,19 @@ private final class MemeForgeModel {
 	}
 
 	func removeGenerationAsset(_ asset: SelectedGenerationAsset) {
-		selectedGenerationAssets.removeAll { $0.id == asset.id }
-		resetResults()
+		removeGenerationAsset(id: asset.id)
 	}
 
-	func deleteGenerationAsset(id: UUID, collectionID: UUID?) {
-		selectedGenerationAssets.removeAll { asset in
-			asset.id == id || asset.collectionID == collectionID
-		}
-		if let collectionID {
-			SharedSettings.deleteGenerationAsset(id: collectionID)
-			refreshGenerationAssetCollection()
-		}
+	func removeGenerationAsset(id: UUID) {
+		selectedGenerationAssets.removeAll { $0.id == id }
+		resetResults()
+		showStatus("Removed")
+	}
+
+	func deleteCollectionGenerationAsset(id: UUID) {
+		selectedGenerationAssets.removeAll { $0.collectionID == id }
+		SharedSettings.deleteGenerationAsset(id: id)
+		refreshGenerationAssetCollection()
 		resetResults()
 		showStatus("Deleted")
 	}

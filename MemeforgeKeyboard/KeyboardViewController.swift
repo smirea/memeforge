@@ -1240,9 +1240,12 @@ final class KeyboardViewController: UIInputViewController {
 		guard !payloads.isEmpty else { return }
 
 		var assets: [SelectedGenerationAsset] = []
+		var selectedCollectionIDs = Set(selectedGenerationAssets.compactMap(\.collectionID))
 		for payload in payloads {
 			guard let item = SharedSettings.addGenerationAsset(payload) else { continue }
-			assets.append(SelectedGenerationAsset(collectionItem: item, imageData: payload.data))
+			guard selectedCollectionIDs.insert(item.id).inserted else { continue }
+			let data = SharedSettings.generationAssetData(for: item) ?? payload.data
+			assets.append(SelectedGenerationAsset(collectionItem: item, imageData: data))
 		}
 		guard !assets.isEmpty else { return }
 

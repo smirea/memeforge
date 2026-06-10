@@ -114,6 +114,14 @@ enum SharedSettings {
 	@discardableResult
 	static func addGenerationAsset(_ payload: GenerationAssetPayload) -> GenerationAssetItem? {
 		guard let directory = generationAssetDirectory() else { return nil }
+		let collection = generationAssetCollection
+		if let existing = collection.first(where: { item in
+			guard let data = generationAssetData(for: item) else { return false }
+			return data == payload.data
+		}) {
+			return existing
+		}
+
 		let id = UUID()
 		let filename = "\(id.uuidString).\(generationAssetExtension(for: payload.mimeType))"
 		let url = directory.appendingPathComponent(filename)
@@ -131,9 +139,9 @@ enum SharedSettings {
 			addedAt: Date().timeIntervalSince1970,
 			useCount: 0
 		)
-		var collection = generationAssetCollection
-		collection.insert(item, at: 0)
-		saveGenerationAssetCollection(collection)
+		var updatedCollection = collection
+		updatedCollection.insert(item, at: 0)
+		saveGenerationAssetCollection(updatedCollection)
 		return item
 	}
 
