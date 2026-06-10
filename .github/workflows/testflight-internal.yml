@@ -1,0 +1,49 @@
+name: TestFlight Internal Distribution
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: Branch for Xcode Cloud to build
+        required: true
+        default: master
+
+permissions:
+  contents: read
+
+concurrency:
+  group: testflight-internal-${{ inputs.branch }}
+  cancel-in-progress: false
+
+jobs:
+  trigger:
+    name: Trigger Xcode Cloud build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      ASC_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+      APP_STORE_CONNECT_PRIVATE_KEY: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
+      XCODE_CLOUD_WORKFLOW_ID: ${{ vars.XCODE_CLOUD_WORKFLOW_ID || '8A2FE4FD-B115-4866-A097-B6D5247F8ED0' }}
+      XCODE_CLOUD_REPOSITORY_ID: ${{ vars.XCODE_CLOUD_REPOSITORY_ID }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Write App Store Connect API key
+        run: |
+          key_path="$RUNNER_TEMP/AuthKey_${ASC_KEY_ID}.p8"
+          python3 - <<'PY' > "$key_path"
+          import os
+
+          key = os.environ["APP_STORE_CONNECT_PRIVATE_KEY"]
+          if "\\n" in key and "\n" not in key.strip():
+              key = key.replace("\\n", "\n")
+          print(key.strip())
+          PY
+          chmod 600 "$key_path"
+          echo "ASC_KEY_PATH=$key_path" >> "$GITHUB_ENV"
+
+      - name: Trigger Xcode Cloud workflow
+        run: scripts/deploy.sh "${{ inputs.branch }}"
