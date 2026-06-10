@@ -591,27 +591,21 @@ private struct PreviewSelectionButton: View {
 	let isSelected: Bool
 	let toggle: () -> Void
 
-	@ViewBuilder
 	var body: some View {
-		if isSelected {
-			button
-				.background(Color.accentColor, in: Circle())
-				.accessibilityLabel("Remove from generation assets")
-		} else {
-			button
-				.liquidGlassSurface(cornerRadius: 28, interactive: true)
-				.accessibilityLabel("Add to generation assets")
-		}
-	}
-
-	private var button: some View {
 		Button(action: toggle) {
 			Image(systemName: isSelected ? "checkmark" : "plus")
 				.font(.title3.weight(.bold))
 				.foregroundStyle(.white)
 				.frame(width: 56, height: 56)
+				.background(isSelected ? Color.accentColor : .black.opacity(0.62), in: Circle())
+				.overlay {
+					Circle()
+						.stroke(.white.opacity(0.24), lineWidth: 1)
+				}
 		}
 		.buttonStyle(.plain)
+		.contentShape(Circle())
+		.accessibilityLabel(isSelected ? "Remove from generation assets" : "Add to generation assets")
 		.animation(.snappy, value: isSelected)
 	}
 }
@@ -747,6 +741,8 @@ private enum FullScreenPreviewItem: Identifiable {
 }
 
 private struct FullScreenImagePreview: View {
+	@Environment(\.dismiss) private var dismiss
+
 	let item: FullScreenPreviewItem
 	let selection: PreviewSelectionAction?
 	let delete: (() -> Void)?
@@ -761,6 +757,7 @@ private struct FullScreenImagePreview: View {
 			NativePhotoPreview(item: item)
 				.ignoresSafeArea()
 				.accessibilityLabel(item.title)
+				.allowsHitTesting(false)
 
 			VStack {
 				topControls
@@ -780,7 +777,7 @@ private struct FullScreenImagePreview: View {
 			if let delete {
 				controlButton(systemName: "trash.fill", accessibilityLabel: "Delete") {
 					delete()
-					close()
+					closePreview()
 				}
 			}
 			Spacer()
@@ -793,21 +790,13 @@ private struct FullScreenImagePreview: View {
 	}
 
 	private var controls: some View {
-		Group {
-			if #available(iOS 26, *) {
-				GlassEffectContainer(spacing: 16) {
-					controlRow
-				}
-			} else {
-				controlRow
-			}
-		}
+		controlRow
 	}
 
 	private var controlRow: some View {
 		HStack {
 			controlButton(systemName: "xmark", accessibilityLabel: "Close") {
-				close()
+				closePreview()
 			}
 
 			Spacer()
@@ -824,10 +813,20 @@ private struct FullScreenImagePreview: View {
 				.font(.title3.weight(.bold))
 				.foregroundStyle(.white)
 				.frame(width: 56, height: 56)
+				.background(.black.opacity(0.62), in: Circle())
+				.overlay {
+					Circle()
+						.stroke(.white.opacity(0.24), lineWidth: 1)
+				}
 		}
 		.buttonStyle(.plain)
-		.liquidGlassSurface(cornerRadius: 28, interactive: true)
+		.contentShape(Circle())
 		.accessibilityLabel(accessibilityLabel)
+	}
+
+	private func closePreview() {
+		close()
+		dismiss()
 	}
 }
 
