@@ -1803,10 +1803,7 @@ private final class MemeForgeModel {
 	private var historyUseCounts: [String: Int] = [:]
 
 	private let searchPageSize = 30
-	private let generatedStyles = [
-		"Classic photographic meme style.",
-		"Bold illustrated meme style.",
-	]
+	private let generationInstruction = "Create exactly one static meme image. Make it visually clear, funny, and ready to share."
 
 	init() {
 		mode = MemeMode(rawValue: SharedSettings.appMemeMode) ?? .search
@@ -2103,7 +2100,7 @@ private final class MemeForgeModel {
 		canLoadMoreSearchResults = false
 		isLoading = true
 		showingHistory = false
-		pendingGenerationCount = generatedStyles.count
+		pendingGenerationCount = 1
 		let assets = assetsOverride ?? selectedGenerationAssets
 		recordSelectedGenerationAssetUses(assets)
 
@@ -2113,38 +2110,17 @@ private final class MemeForgeModel {
 	}
 
 	private func generateResults(for prompt: String, assets: [SelectedGenerationAsset], generationID: UUID) async {
-		var firstError: RequestError?
-		var didGenerate = false
-		var generatedResults: [MemeResult] = []
-
-		await withTaskGroup(of: Result<MemeResult, RequestError>.self) { group in
-			for style in generatedStyles {
-				group.addTask {
-					await Self.geminiResult(for: prompt, style: style, assets: assets)
-				}
-			}
-
-			for await generated in group {
-				guard self.generationID == generationID else { return }
-				pendingGenerationCount -= 1
-				switch generated {
-				case .success(let result):
-					results.append(result)
-					generatedResults.append(result)
-					didGenerate = true
-				case .failure(let error):
-					firstError = firstError ?? error
-				}
-			}
-		}
-
+		let generated = await Self.geminiResult(for: prompt, instruction: generationInstruction, assets: assets)
 		guard self.generationID == generationID else { return }
 		isLoading = false
 		pendingGenerationCount = 0
-		if !didGenerate {
-			requestError = firstError ?? RequestError(title: "Generation failed", detail: "No image data came back from Gemini.")
-		} else {
-			recordGenerationHistory(prompt: prompt, assets: assets, results: generatedResults)
+
+		switch generated {
+		case .success(let result):
+			results.append(result)
+			recordGenerationHistory(prompt: prompt, assets: assets, results: [result])
+		case .failure(let error):
+			requestError = error
 		}
 	}
 
@@ -2278,7 +2254,11 @@ private final class MemeForgeModel {
 		}
 	}
 
-	private nonisolated static func geminiResult(for prompt: String, style: String, assets: [SelectedGenerationAsset]) async -> Result<MemeResult, RequestError> {
+	private nonisolated static func geminiResult(
+		for prompt: String,
+		instruction: String,
+		assets: [SelectedGenerationAsset]
+	) async -> Result<MemeResult, RequestError> {
 		guard let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(SharedSettings.geminiModel):generateContent") else {
 			return .failure(RequestError(title: "Generation failed", detail: "Could not build the Gemini URL."))
 		}
@@ -2287,7 +2267,7 @@ private final class MemeForgeModel {
 		request.httpMethod = "POST"
 		request.setValue(SharedSettings.geminiAPIKey, forHTTPHeaderField: "x-goog-api-key")
 		request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-		request.httpBody = geminiRequestBody(for: prompt, style: style, assets: assets)
+		request.httpBody = geminiRequestBody(for: prompt, instruction: instruction, assets: assets)
 
 		do {
 			let (data, response) = try await URLSession.shared.data(for: request)
@@ -2358,7 +2338,7 @@ private final class MemeForgeModel {
 		return CopyPayload(data: data, pasteboardType: pasteboardType)
 	}
 
-	private nonisolated static func geminiRequestBody(for idea: String, style: String, assets: [SelectedGenerationAsset]) -> Data? {
+	private nonisolated static func geminiRequestBody(for idea: String, instruction: String, assets: [SelectedGenerationAsset]) -> Data? {
 		var parts: [[String: Any]] = [
 			["text": idea],
 		]
@@ -2374,7 +2354,7 @@ private final class MemeForgeModel {
 		let body: [String: Any] = [
 			"systemInstruction": [
 				"parts": [
-					["text": style],
+					["text": instruction],
 				],
 			],
 			"contents": [
