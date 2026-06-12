@@ -10,13 +10,13 @@ private let floatingSettingsButtonContentTopPadding: CGFloat = 76
 
 struct ContentView: View {
 	@State private var model = MemeForgeModel()
-	@State private var showsSettings = SharedSettings.appShowsSettings
+	@State private var currentScreen = AppScreen.initial
 	@State private var appearanceTheme = SharedSettings.appearanceTheme
 
 	var body: some View {
 		NavigationStack {
 			ZStack(alignment: .topTrailing) {
-				if showsSettings {
+				if currentScreen == .settings {
 					VStack(spacing: 0) {
 						SettingsHeader {
 							toggleMode()
@@ -27,7 +27,7 @@ struct ContentView: View {
 					MemeForgeView(model: model)
 				}
 
-				if !showsSettings, !model.usesGeneratedStage {
+				if currentScreen != .settings, !model.usesGeneratedStage {
 					SettingsToggleButton(settingsActive: false) {
 						toggleMode()
 					}
@@ -40,20 +40,91 @@ struct ContentView: View {
 			.toolbar(.hidden, for: .navigationBar)
 			.onOpenURL { url in
 				if url.host == "setup" || url.path == "/setup" {
-					setShowsSettings(true)
+					setScreen(.settings)
 				}
 			}
+			.onChange(of: model.mode) { _, mode in
+				guard currentScreen != .settings else { return }
+				setScreen(AppScreen(mode: mode))
+			}
+			.simultaneousGesture(screenSwipeGesture)
+			.animation(.snappy, value: currentScreen)
 		}
 		.preferredColorScheme(appearanceTheme.colorScheme)
 	}
 
 	private func toggleMode() {
-		setShowsSettings(!showsSettings)
+		setScreen(currentScreen == .settings ? AppScreen(mode: model.mode) : .settings)
 	}
 
-	private func setShowsSettings(_ value: Bool) {
-		showsSettings = value
-		SharedSettings.appShowsSettings = value
+	private var screenSwipeGesture: some Gesture {
+		DragGesture(minimumDistance: 40)
+			.onEnded { value in
+				guard !model.usesGeneratedStage else { return }
+				let horizontal = value.translation.width
+				let vertical = value.translation.height
+				guard abs(horizontal) > 80, abs(horizontal) > abs(vertical) * 1.4 else { return }
+				moveScreen(by: horizontal < 0 ? 1 : -1)
+			}
+	}
+
+	private func moveScreen(by offset: Int) {
+		let screens = AppScreen.allCases
+		guard let index = screens.firstIndex(of: currentScreen) else { return }
+		let nextIndex = (index + offset + screens.count) % screens.count
+		setScreen(screens[nextIndex])
+	}
+
+	private func setScreen(_ screen: AppScreen) {
+		currentScreen = screen
+		if let mode = screen.mode {
+			SharedSettings.appShowsSettings = false
+			if model.mode != mode {
+				model.mode = mode
+			}
+		} else {
+			SharedSettings.appShowsSettings = true
+		}
+	}
+}
+
+private enum AppScreen: CaseIterable, Identifiable, Sendable {
+	case search
+	case generate
+	case history
+	case settings
+
+	static var initial: Self {
+		if SharedSettings.appShowsSettings {
+			return .settings
+		}
+		return AppScreen(mode: MemeMode(rawValue: SharedSettings.appMemeMode) ?? .search)
+	}
+
+	var id: Self { self }
+
+	init(mode: MemeMode) {
+		switch mode {
+		case .search:
+			self = .search
+		case .generate:
+			self = .generate
+		case .history:
+			self = .history
+		}
+	}
+
+	var mode: MemeMode? {
+		switch self {
+		case .search:
+			.search
+		case .generate:
+			.generate
+		case .history:
+			.history
+		case .settings:
+			nil
+		}
 	}
 }
 

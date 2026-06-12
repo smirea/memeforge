@@ -5,7 +5,7 @@ import UIKit
 import UniformTypeIdentifiers
 
 final class KeyboardViewController: UIInputViewController {
-	private enum Mode: Int {
+	private enum Mode: Int, CaseIterable {
 		case search
 		case generate
 	}
@@ -124,6 +124,7 @@ final class KeyboardViewController: UIInputViewController {
 	private var assetPickerVisible = false
 	private var selectedGenerationAssets: [SelectedGenerationAsset] = []
 	private var generationAssetCollection: [SharedSettings.GenerationAssetItem] = []
+	private var screenSwipeGestureRecognizers: [UISwipeGestureRecognizer] = []
 	private let keyFeedback = UIImpactFeedbackGenerator(style: .light)
 
 	private let searchPageSize = 30
@@ -321,6 +322,7 @@ final class KeyboardViewController: UIInputViewController {
 			rootStack.topAnchor.constraint(equalTo: view.topAnchor, constant: 6),
 			rootStack.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -4),
 		])
+		installScreenSwipeGestures()
 
 		keyboardRestoreButton.isHidden = true
 		let topRow = UIStackView(arrangedSubviews: [modeControl, keyboardRestoreButton, closeButton])
@@ -850,7 +852,45 @@ final class KeyboardViewController: UIInputViewController {
 	}
 
 	@objc private func modeChanged() {
-		mode = Mode(rawValue: modeControl.selectedSegmentIndex) ?? .search
+		setMode(Mode(rawValue: modeControl.selectedSegmentIndex) ?? .search)
+	}
+
+	@objc private func screenSwiped(_ recognizer: UISwipeGestureRecognizer) {
+		switch recognizer.direction {
+		case .left:
+			moveMode(by: 1)
+		case .right:
+			moveMode(by: -1)
+		default:
+			break
+		}
+	}
+
+	private func installScreenSwipeGestures() {
+		let leftSwipe = UISwipeGestureRecognizer(target: self, action: #selector(screenSwiped(_:)))
+		leftSwipe.direction = .left
+		let rightSwipe = UISwipeGestureRecognizer(target: self, action: #selector(screenSwiped(_:)))
+		rightSwipe.direction = .right
+		screenSwipeGestureRecognizers = [leftSwipe, rightSwipe]
+
+		for recognizer in screenSwipeGestureRecognizers {
+			recognizer.cancelsTouchesInView = false
+			recognizer.delegate = self
+			view.addGestureRecognizer(recognizer)
+		}
+	}
+
+	private func moveMode(by offset: Int) {
+		let modes = Mode.allCases
+		guard let index = modes.firstIndex(of: mode) else { return }
+		let nextIndex = (index + offset + modes.count) % modes.count
+		setMode(modes[nextIndex])
+	}
+
+	private func setMode(_ newMode: Mode) {
+		guard mode != newMode else { return }
+		mode = newMode
+		modeControl.selectedSegmentIndex = newMode.rawValue
 		assetPickerVisible = false
 		resetResults()
 		setTypingControlsVisible(true)
@@ -1934,6 +1974,17 @@ extension KeyboardViewController: UICollectionViewDataSource, UICollectionViewDe
 		if remaining < 240 {
 			loadMoreSearchResultsIfNeeded()
 		}
+	}
+}
+
+extension KeyboardViewController: UIGestureRecognizerDelegate {
+	func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+		guard screenSwipeGestureRecognizers.contains(where: { $0 === gestureRecognizer }) else { return true }
+		return !assetPickerVisible
+	}
+
+	func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+		screenSwipeGestureRecognizers.contains { $0 === gestureRecognizer }
 	}
 }
 
