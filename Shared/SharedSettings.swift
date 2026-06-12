@@ -13,6 +13,7 @@ enum SharedSettings {
 	private static let generationHistoryKey = "generationHistory"
 	private static let appShowsSettingsKey = "appShowsSettings"
 	private static let appMemeModeKey = "appMemeMode"
+	private static let appMemeSortOrderKey = "appMemeSortOrder"
 	private static let appearanceThemeKey = "appearanceTheme"
 	private static let generationAssetMaxSide: CGFloat = 1280
 	private static let generationHistoryMaxCount = 80
@@ -169,6 +170,11 @@ enum SharedSettings {
 	static var appMemeMode: String {
 		get { store.string(forKey: appMemeModeKey) ?? "search" }
 		set { store.set(newValue, forKey: appMemeModeKey) }
+	}
+
+	static var appMemeSortOrder: String {
+		get { store.string(forKey: appMemeSortOrderKey) ?? "date" }
+		set { store.set(newValue, forKey: appMemeSortOrderKey) }
 	}
 
 	static var appearanceTheme: AppearanceTheme {

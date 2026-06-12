@@ -28,7 +28,13 @@ struct ContentView: View {
 				}
 
 				if currentScreen != .settings, !model.usesGeneratedStage {
-					SettingsToggleButton(settingsActive: false) {
+					FloatingControlsRow(
+						sortOrder: model.sortOrder,
+						showsSortControl: currentScreen.sortable,
+						setSortOrder: { sortOrder in
+							model.sortOrder = sortOrder
+						}
+					) {
 						toggleMode()
 					}
 					.padding(.top, 10)
@@ -88,6 +94,22 @@ struct ContentView: View {
 	}
 }
 
+private enum MemeSortOrder: String, CaseIterable, Identifiable, Sendable {
+	case date
+	case count
+
+	var id: Self { self }
+
+	var title: String {
+		switch self {
+		case .date:
+			"Date"
+		case .count:
+			"Count"
+		}
+	}
+}
+
 private enum AppScreen: CaseIterable, Identifiable, Sendable {
 	case search
 	case generate
@@ -124,6 +146,15 @@ private enum AppScreen: CaseIterable, Identifiable, Sendable {
 			.history
 		case .settings:
 			nil
+		}
+	}
+
+	var sortable: Bool {
+		switch self {
+		case .search, .generate:
+			true
+		case .history, .settings:
+			false
 		}
 	}
 }
@@ -172,6 +203,58 @@ private struct SettingsToggleButton: View {
 		.accessibilityLabel(settingsActive ? "Show Memeforge" : "Show settings")
 		.accessibilityValue(settingsActive ? "On" : "Off")
 		.accessibilityAddTraits(settingsActive ? .isSelected : [])
+	}
+}
+
+private struct FloatingControlsRow: View {
+	let sortOrder: MemeSortOrder
+	let showsSortControl: Bool
+	let setSortOrder: (MemeSortOrder) -> Void
+	let toggleSettings: () -> Void
+
+	var body: some View {
+		HStack(spacing: 10) {
+			if showsSortControl {
+				SortOrderControl(sortOrder: sortOrder, setSortOrder: setSortOrder)
+			}
+
+			SettingsToggleButton(settingsActive: false) {
+				toggleSettings()
+			}
+		}
+		.animation(.snappy, value: showsSortControl)
+	}
+}
+
+private struct SortOrderControl: View {
+	let sortOrder: MemeSortOrder
+	let setSortOrder: (MemeSortOrder) -> Void
+
+	var body: some View {
+		HStack(spacing: 2) {
+			ForEach(MemeSortOrder.allCases) { item in
+				Button {
+					setSortOrder(item)
+				} label: {
+					Text(item.title)
+						.font(.subheadline.weight(.semibold))
+						.foregroundStyle(sortOrder == item ? Color.accentColor : Color.primary)
+						.frame(width: 62, height: 42)
+						.background {
+							if sortOrder == item {
+								RoundedRectangle(cornerRadius: 14)
+									.fill(Color.accentColor.opacity(0.18))
+							}
+						}
+				}
+				.buttonStyle(.plain)
+				.accessibilityLabel("Sort by \(item.title.lowercased())")
+				.accessibilityValue(sortOrder == item ? "Selected" : "Not selected")
+				.accessibilityAddTraits(sortOrder == item ? .isSelected : [])
+			}
+		}
+		.padding(3)
+		.liquidGlassSurface(cornerRadius: 18, interactive: true)
 	}
 }
 
@@ -303,9 +386,9 @@ private struct MemeForgeView: View {
 		} else {
 			ScrollView {
 				VStack(alignment: .leading, spacing: 16) {
-					if model.mode == .generate, !model.generationAssetCollection.isEmpty {
+					if model.mode == .generate, !model.visibleGenerationAssetCollection.isEmpty {
 						GenerationAssetCollectionGrid(
-							items: model.generationAssetCollection,
+							items: model.visibleGenerationAssetCollection,
 							selectedCollectionIDs: model.selectedGenerationAssetCollectionIDs,
 							select: { item in
 								model.toggleGenerationAsset(item)
@@ -832,7 +915,7 @@ private struct MemeResultsGrid: View {
 
 	var body: some View {
 		LazyVGrid(columns: columns, spacing: 0) {
-			ForEach(model.results) { result in
+			ForEach(model.visibleResults) { result in
 				MemeResultCell(result: result, copied: model.copiedResultID == result.id) {
 					open(result)
 				}
@@ -2163,6 +2246,13 @@ private struct KeyboardTestTextField: UIViewRepresentable {
 @MainActor
 @Observable
 private final class MemeForgeModel {
+	var sortOrder: MemeSortOrder {
+		didSet {
+			guard oldValue != sortOrder else { return }
+			SharedSettings.appMemeSortOrder = sortOrder.rawValue
+			refreshHistoryIfNeeded()
+		}
+	}
 	var mode: MemeMode {
 		didSet {
 			guard oldValue != mode else { return }
@@ -2199,6 +2289,13 @@ private final class MemeForgeModel {
 	var selectedGenerationAssetCollectionIDs: Set<UUID> {
 		Set(selectedGenerationAssets.compactMap(\.collectionID))
 	}
+	var visibleResults: [MemeResult] {
+		guard mode == .search, showingHistory else { return results }
+		return sortedSearchResults(results)
+	}
+	var visibleGenerationAssetCollection: [SharedSettings.GenerationAssetItem] {
+		sortedGenerationAssets(generationAssetCollection)
+	}
 	var generationHistorySections: [GenerationHistorySection] {
 		let calendar = Calendar.current
 		let grouped = Dictionary(grouping: generationHistory) { item in
@@ -2233,6 +2330,7 @@ private final class MemeForgeModel {
 	private let generationInstruction = "Create exactly one static meme image. Make it visually clear, funny, and ready to share."
 
 	init() {
+		sortOrder = MemeSortOrder(rawValue: SharedSettings.appMemeSortOrder) ?? .date
 		mode = MemeMode(rawValue: SharedSettings.appMemeMode) ?? .search
 		refreshHistoryIfNeeded()
 		refreshGenerationAssetCollection()
@@ -2400,6 +2498,52 @@ private final class MemeForgeModel {
 		}
 		results = history.map(MemeResult.init(historyItem:))
 		showingHistory = !results.isEmpty
+	}
+
+	private func sortedSearchResults(_ results: [MemeResult]) -> [MemeResult] {
+		switch sortOrder {
+		case .date:
+			guard showingHistory else { return results }
+			return results.enumerated().sorted { lhs, rhs in
+				let lhsDate = lhs.element.sortDate ?? 0
+				let rhsDate = rhs.element.sortDate ?? 0
+				if lhsDate != rhsDate {
+					return lhsDate > rhsDate
+				}
+				return lhs.offset < rhs.offset
+			}.map(\.element)
+		case .count:
+			return results.enumerated().sorted { lhs, rhs in
+				if lhs.element.useCount != rhs.element.useCount {
+					return lhs.element.useCount > rhs.element.useCount
+				}
+				let lhsDate = lhs.element.sortDate ?? 0
+				let rhsDate = rhs.element.sortDate ?? 0
+				if lhsDate != rhsDate {
+					return lhsDate > rhsDate
+				}
+				return lhs.offset < rhs.offset
+			}.map(\.element)
+		}
+	}
+
+	private func sortedGenerationAssets(_ items: [SharedSettings.GenerationAssetItem]) -> [SharedSettings.GenerationAssetItem] {
+		items.enumerated().sorted { lhs, rhs in
+			switch sortOrder {
+			case .date:
+				if lhs.element.addedAt != rhs.element.addedAt {
+					return lhs.element.addedAt > rhs.element.addedAt
+				}
+			case .count:
+				if lhs.element.useCount != rhs.element.useCount {
+					return lhs.element.useCount > rhs.element.useCount
+				}
+				if lhs.element.addedAt != rhs.element.addedAt {
+					return lhs.element.addedAt > rhs.element.addedAt
+				}
+			}
+			return lhs.offset < rhs.offset
+		}.map(\.element)
 	}
 
 	func loadMoreSearchResultsIfNeeded(appearingResultID: UUID) {
@@ -2902,6 +3046,7 @@ private struct MemeResult: Identifiable, Hashable, Sendable {
 	let pasteboardType: String
 	let generationAssets: [SelectedGenerationAsset]
 	let generationHistoryID: UUID?
+	let sortDate: TimeInterval?
 	let useCount: Int
 
 	var historyKey: String? {
@@ -2917,6 +3062,7 @@ private struct MemeResult: Identifiable, Hashable, Sendable {
 		pasteboardType: String,
 		generationAssets: [SelectedGenerationAsset] = [],
 		generationHistoryID: UUID? = nil,
+		sortDate: TimeInterval? = nil,
 		useCount: Int = 0
 	) {
 		self.title = title
@@ -2927,6 +3073,7 @@ private struct MemeResult: Identifiable, Hashable, Sendable {
 		self.pasteboardType = pasteboardType
 		self.generationAssets = generationAssets
 		self.generationHistoryID = generationHistoryID
+		self.sortDate = sortDate
 		self.useCount = useCount
 	}
 
@@ -2956,6 +3103,7 @@ private struct MemeResult: Identifiable, Hashable, Sendable {
 			copyURL: item.copyURL,
 			imageData: nil,
 			pasteboardType: item.pasteboardType,
+			sortDate: item.lastUsedAt,
 			useCount: item.useCount
 		)
 	}
@@ -2970,6 +3118,7 @@ private struct MemeResult: Identifiable, Hashable, Sendable {
 			pasteboardType: pasteboardType,
 			generationAssets: generationAssets,
 			generationHistoryID: generationHistoryID,
+			sortDate: sortDate,
 			useCount: useCount
 		)
 	}
