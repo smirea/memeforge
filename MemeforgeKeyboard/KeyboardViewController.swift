@@ -22,6 +22,11 @@ final class KeyboardViewController: UIInputViewController {
 		case capsLock
 	}
 
+	private enum ScreenSlideDirection {
+		case left
+		case right
+	}
+
 	fileprivate struct MemeResult: Hashable {
 		let id = UUID()
 		let title: String
@@ -858,9 +863,9 @@ final class KeyboardViewController: UIInputViewController {
 	@objc private func screenSwiped(_ recognizer: UISwipeGestureRecognizer) {
 		switch recognizer.direction {
 		case .left:
-			moveMode(by: 1)
+			moveMode(by: 1, slideDirection: .left)
 		case .right:
-			moveMode(by: -1)
+			moveMode(by: -1, slideDirection: .right)
 		default:
 			break
 		}
@@ -880,15 +885,24 @@ final class KeyboardViewController: UIInputViewController {
 		}
 	}
 
-	private func moveMode(by offset: Int) {
+	private func moveMode(by offset: Int, slideDirection: ScreenSlideDirection? = nil) {
 		let modes = Mode.allCases
 		guard let index = modes.firstIndex(of: mode) else { return }
 		let nextIndex = (index + offset + modes.count) % modes.count
-		setMode(modes[nextIndex])
+		setMode(modes[nextIndex], slideDirection: slideDirection)
 	}
 
-	private func setMode(_ newMode: Mode) {
+	private func setMode(_ newMode: Mode, slideDirection: ScreenSlideDirection? = nil) {
 		guard mode != newMode else { return }
+		if let slideDirection {
+			let transition = CATransition()
+			transition.type = .push
+			transition.subtype = slideDirection == .left ? .fromRight : .fromLeft
+			transition.duration = 0.28
+			transition.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+			rootStack.layer.add(transition, forKey: "screenModePush")
+		}
+
 		mode = newMode
 		modeControl.selectedSegmentIndex = newMode.rawValue
 		assetPickerVisible = false
@@ -896,6 +910,7 @@ final class KeyboardViewController: UIInputViewController {
 		setTypingControlsVisible(true)
 		updatePrompt()
 		showHistoryIfNeeded()
+		view.layoutIfNeeded()
 	}
 
 	@objc private func showAlphabetKeyboard() {

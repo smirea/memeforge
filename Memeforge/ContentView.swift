@@ -15,22 +15,67 @@ struct ContentView: View {
 
 	var body: some View {
 		NavigationStack {
-			ZStack(alignment: .topTrailing) {
-				if currentScreen == .settings {
-					VStack(spacing: 0) {
-						SettingsHeader {
-							toggleMode()
-						}
-						SettingsView(appearanceTheme: $appearanceTheme)
+			screenPager
+			.frame(maxWidth: .infinity, maxHeight: .infinity)
+			.background(Color(.systemBackground).ignoresSafeArea())
+			.toolbar(.hidden, for: .navigationBar)
+			.onOpenURL { url in
+				if url.host == "setup" || url.path == "/setup" {
+					withAnimation(.snappy) {
+						setScreen(.settings)
 					}
-				} else {
-					MemeForgeView(model: model)
 				}
+			}
+			.onChange(of: model.mode) { _, mode in
+				let screen = AppScreen(mode: mode)
+				guard currentScreen != .settings, currentScreen != screen else { return }
+				withAnimation(.snappy) {
+					setScreen(screen)
+				}
+			}
+		}
+		.preferredColorScheme(appearanceTheme.colorScheme)
+	}
 
-				if currentScreen != .settings, !model.usesGeneratedStage {
+	@ViewBuilder
+	private var screenPager: some View {
+		if model.usesGeneratedStage, currentScreen == .generate {
+			screenContent(.generate)
+		} else {
+			TabView(selection: screenSelection) {
+				ForEach(AppScreen.allCases) { screen in
+					screenContent(screen)
+						.tag(screen)
+				}
+			}
+			.tabViewStyle(.page(indexDisplayMode: .never))
+		}
+	}
+
+	private var screenSelection: Binding<AppScreen> {
+		Binding(
+			get: { currentScreen },
+			set: { setScreen($0) }
+		)
+	}
+
+	@ViewBuilder
+	private func screenContent(_ screen: AppScreen) -> some View {
+		if screen == .settings {
+			VStack(spacing: 0) {
+				SettingsHeader {
+					toggleMode()
+				}
+				SettingsView(appearanceTheme: $appearanceTheme)
+			}
+		} else if let mode = screen.mode {
+			ZStack(alignment: .topTrailing) {
+				MemeForgeView(model: model, screenMode: mode)
+
+				if !model.usesGeneratedStage {
 					FloatingControlsRow(
 						sortOrder: model.sortOrder,
-						showsSortControl: currentScreen.sortable,
+						showsSortControl: screen.sortable,
 						setSortOrder: { sortOrder in
 							model.sortOrder = sortOrder
 						}
@@ -41,44 +86,13 @@ struct ContentView: View {
 					.padding(.trailing, 16)
 				}
 			}
-			.frame(maxWidth: .infinity, maxHeight: .infinity)
-			.background(Color(.systemBackground).ignoresSafeArea())
-			.toolbar(.hidden, for: .navigationBar)
-			.onOpenURL { url in
-				if url.host == "setup" || url.path == "/setup" {
-					setScreen(.settings)
-				}
-			}
-			.onChange(of: model.mode) { _, mode in
-				guard currentScreen != .settings else { return }
-				setScreen(AppScreen(mode: mode))
-			}
-			.simultaneousGesture(screenSwipeGesture)
-			.animation(.snappy, value: currentScreen)
 		}
-		.preferredColorScheme(appearanceTheme.colorScheme)
 	}
 
 	private func toggleMode() {
-		setScreen(currentScreen == .settings ? AppScreen(mode: model.mode) : .settings)
-	}
-
-	private var screenSwipeGesture: some Gesture {
-		DragGesture(minimumDistance: 40)
-			.onEnded { value in
-				guard !model.usesGeneratedStage else { return }
-				let horizontal = value.translation.width
-				let vertical = value.translation.height
-				guard abs(horizontal) > 80, abs(horizontal) > abs(vertical) * 1.4 else { return }
-				moveScreen(by: horizontal < 0 ? 1 : -1)
-			}
-	}
-
-	private func moveScreen(by offset: Int) {
-		let screens = AppScreen.allCases
-		guard let index = screens.firstIndex(of: currentScreen) else { return }
-		let nextIndex = (index + offset + screens.count) % screens.count
-		setScreen(screens[nextIndex])
+		withAnimation(.snappy) {
+			setScreen(currentScreen == .settings ? AppScreen(mode: model.mode) : .settings)
+		}
 	}
 
 	private func setScreen(_ screen: AppScreen) {
@@ -292,6 +306,7 @@ private extension SharedSettings.AppearanceTheme {
 
 private struct MemeForgeView: View {
 	@Bindable var model: MemeForgeModel
+	let screenMode: MemeMode
 	@State private var pickerItems: [PhotosPickerItem] = []
 	@State private var fullScreenPreview: FullScreenPreviewItem?
 	@State private var visibleGeneratedResultID: UUID?
@@ -357,7 +372,7 @@ private struct MemeForgeView: View {
 
 	@ViewBuilder
 	private var mainContent: some View {
-		if model.usesGeneratedStage {
+		if screenMode == .generate, model.usesGeneratedStage {
 			GeneratedResultsStage(
 				results: model.results,
 				isLoading: model.isLoading,
@@ -373,7 +388,7 @@ private struct MemeForgeView: View {
 					}
 				}
 			)
-		} else if model.mode == .history {
+		} else if screenMode == .history {
 			GenerationHistoryFeed(
 				sections: model.generationHistorySections,
 				copyPrompt: { step in
@@ -386,7 +401,7 @@ private struct MemeForgeView: View {
 		} else {
 			ScrollView {
 				VStack(alignment: .leading, spacing: 16) {
-					if model.mode == .generate, !model.visibleGenerationAssetCollection.isEmpty {
+					if screenMode == .generate, !model.visibleGenerationAssetCollection.isEmpty {
 						GenerationAssetCollectionGrid(
 							items: model.visibleGenerationAssetCollection,
 							selectedCollectionIDs: model.selectedGenerationAssetCollectionIDs,
@@ -399,16 +414,16 @@ private struct MemeForgeView: View {
 						)
 					}
 
-					if let requestError = model.requestError {
+					if showsActiveModelState, let requestError = model.requestError {
 						RequestErrorView(requestError: requestError)
 					}
 
-					if model.isLoading, model.results.isEmpty {
-						LoadingTilesGrid(mode: model.mode)
+					if showsActiveModelState, model.isLoading, model.results.isEmpty {
+						LoadingTilesGrid(mode: screenMode)
 					}
 
-					if !model.results.isEmpty {
-						MemeResultsGrid(model: model) { result in
+					if showsActiveModelState, !model.results.isEmpty {
+						MemeResultsGrid(model: model, mode: screenMode) { result in
 							fullScreenPreview = .result(result)
 						}
 					}
@@ -423,7 +438,16 @@ private struct MemeForgeView: View {
 	}
 
 	private var contentHorizontalPadding: CGFloat {
-		model.hasTiledContent ? 0 : 16
+		hasTiledContent ? 0 : 16
+	}
+
+	private var hasTiledContent: Bool {
+		(showsActiveModelState && (!model.results.isEmpty || model.isLoading))
+			|| (screenMode == .generate && !model.visibleGenerationAssetCollection.isEmpty)
+	}
+
+	private var showsActiveModelState: Bool {
+		model.mode == screenMode
 	}
 
 	private var bottomControls: some View {
@@ -440,23 +464,30 @@ private struct MemeForgeView: View {
 
 	private var bottomControlsContent: some View {
 		VStack(alignment: .leading, spacing: 10) {
-			if model.usesGeneratedStage {
+			if screenMode == .generate, model.usesGeneratedStage {
 				GeneratedPromptModeSwitch(mode: generatedPromptMode) { mode in
 					setGeneratedPromptMode(mode)
 				}
 				queryInputArea(showAssetPicker: false)
-			} else if model.mode == .history {
-				ModeTabs(mode: $model.mode)
+			} else if screenMode == .history {
+				ModeTabs(mode: modeTabSelection)
 			} else {
 				inputArea
-				ModeTabs(mode: $model.mode)
+				ModeTabs(mode: modeTabSelection)
 			}
 		}
 	}
 
+	private var modeTabSelection: Binding<MemeMode> {
+		Binding(
+			get: { screenMode },
+			set: { model.mode = $0 }
+		)
+	}
+
 	private var inputArea: some View {
 		VStack(alignment: .leading, spacing: 10) {
-			if model.mode == .generate, !model.selectedGenerationAssets.isEmpty {
+			if screenMode == .generate, !model.selectedGenerationAssets.isEmpty {
 				SelectedGenerationAssetsStrip(
 					assets: model.selectedGenerationAssets,
 					open: { asset in
@@ -479,12 +510,12 @@ private struct MemeForgeView: View {
 		VStack(alignment: .leading, spacing: 10) {
 			HStack(alignment: .center, spacing: 10) {
 				ZStack(alignment: .trailing) {
-					promptInputField(allowsImagePaste: model.mode == .generate && showAssetPicker)
+					promptInputField(allowsImagePaste: screenMode == .generate && showAssetPicker)
 
 					if !model.query.isEmpty {
 						Button {
 							model.clearQuery()
-							focusPromptInput(allowsImagePaste: model.mode == .generate && showAssetPicker)
+							focusPromptInput(allowsImagePaste: screenMode == .generate && showAssetPicker)
 						} label: {
 							Image(systemName: "xmark.circle.fill")
 								.font(.body)
@@ -498,7 +529,7 @@ private struct MemeForgeView: View {
 				}
 				.liquidGlassSurface(cornerRadius: 22, interactive: true)
 
-				if model.mode == .generate, showAssetPicker {
+				if screenMode == .generate, showAssetPicker {
 					PhotosPicker(selection: $pickerItems, maxSelectionCount: nil, matching: .images) {
 						Image(systemName: "photo.stack")
 							.font(.title3.weight(.semibold))
@@ -518,7 +549,7 @@ private struct MemeForgeView: View {
 		if allowsImagePaste {
 			ZStack(alignment: .topLeading) {
 				if model.query.isEmpty {
-					Text(model.mode.placeholder)
+					Text(screenMode.placeholder)
 						.font(.body)
 						.foregroundStyle(.secondary)
 						.padding(.leading, 16)
@@ -531,7 +562,7 @@ private struct MemeForgeView: View {
 				GenerationPromptTextView(
 					text: $model.query,
 					isFocused: generationInputFocusBinding,
-					placeholder: model.mode.placeholder,
+					placeholder: screenMode.placeholder,
 					onSubmit: submitQuery,
 					onPasteImages: importPastedGenerationAssets
 				)
@@ -541,16 +572,16 @@ private struct MemeForgeView: View {
 				.frame(minHeight: 58, alignment: .center)
 			}
 		} else {
-			TextField(model.mode.placeholder, text: $model.query, axis: .vertical)
+			TextField(screenMode.placeholder, text: $model.query, axis: .vertical)
 				.lineLimit(1...5)
 				.font(.body)
 				.padding(.leading, 16)
 				.padding(.trailing, model.query.isEmpty ? 16 : 46)
 				.padding(.vertical, 15)
 				.frame(minHeight: 58, alignment: .center)
-				.textInputAutocapitalization(model.mode == .search ? .never : .sentences)
-				.autocorrectionDisabled(model.mode == .search)
-				.submitLabel(model.mode == .search ? .search : .done)
+				.textInputAutocapitalization(screenMode == .search ? .never : .sentences)
+				.autocorrectionDisabled(screenMode == .search)
+				.submitLabel(screenMode == .search ? .search : .done)
 				.focused($inputFocused)
 				.onSubmit {
 					submitQuery()
@@ -577,6 +608,7 @@ private struct MemeForgeView: View {
 	}
 
 	private func submitQuery() {
+		activateScreenModeIfNeeded()
 		if model.usesGeneratedStage {
 			model.submitGeneratedStage(mode: generatedPromptMode, sourceResult: currentGeneratedResult)
 		} else {
@@ -659,9 +691,16 @@ private struct MemeForgeView: View {
 	}
 
 	private func importPastedGenerationAssets(_ payloads: [SharedSettings.GenerationAssetPayload]) {
-		guard model.mode == .generate else { return }
+		guard screenMode == .generate else { return }
+		activateScreenModeIfNeeded()
 		generationInputFocused = false
 		model.insertPickedGenerationAssets(payloads)
+	}
+
+	private func activateScreenModeIfNeeded() {
+		if model.mode != screenMode {
+			model.mode = screenMode
+		}
 	}
 
 	private func openGenerationAsset(_ item: SharedSettings.GenerationAssetItem) {
@@ -907,10 +946,11 @@ private struct ModeTabs: View {
 
 private struct MemeResultsGrid: View {
 	@Bindable var model: MemeForgeModel
+	let mode: MemeMode
 	let open: (MemeResult) -> Void
 
 	private var columns: [GridItem] {
-		resultGridColumns(for: model.mode)
+		resultGridColumns(for: mode)
 	}
 
 	var body: some View {
