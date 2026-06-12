@@ -213,6 +213,7 @@ private struct MemeForgeView: View {
 	@State private var fullScreenPreview: FullScreenPreviewItem?
 	@State private var visibleGeneratedResultID: UUID?
 	@State private var generatedPromptMode: GeneratedPromptMode = .reroll
+	@State private var generationInputFocused = false
 	@FocusState private var inputFocused: Bool
 
 	var body: some View {
@@ -395,28 +396,12 @@ private struct MemeForgeView: View {
 		VStack(alignment: .leading, spacing: 10) {
 			HStack(alignment: .center, spacing: 10) {
 				ZStack(alignment: .trailing) {
-					TextField(model.mode.placeholder, text: $model.query, axis: .vertical)
-						.lineLimit(1...5)
-						.font(.body)
-						.padding(.leading, 16)
-						.padding(.trailing, model.query.isEmpty ? 16 : 46)
-						.padding(.vertical, 15)
-						.frame(minHeight: 58, alignment: .center)
-						.textInputAutocapitalization(model.mode == .search ? .never : .sentences)
-						.autocorrectionDisabled(model.mode == .search)
-						.submitLabel(model.mode == .search ? .search : .done)
-						.focused($inputFocused)
-						.onSubmit {
-							submitQuery()
-						}
-						.onChange(of: model.query) { _, value in
-							submitIfKeyboardInsertedNewline(value)
-						}
+					promptInputField(allowsImagePaste: model.mode == .generate && showAssetPicker)
 
 					if !model.query.isEmpty {
 						Button {
 							model.clearQuery()
-							inputFocused = true
+							focusPromptInput(allowsImagePaste: model.mode == .generate && showAssetPicker)
 						} label: {
 							Image(systemName: "xmark.circle.fill")
 								.font(.body)
@@ -445,6 +430,69 @@ private struct MemeForgeView: View {
 		}
 	}
 
+	@ViewBuilder
+	private func promptInputField(allowsImagePaste: Bool) -> some View {
+		if allowsImagePaste {
+			ZStack(alignment: .topLeading) {
+				if model.query.isEmpty {
+					Text(model.mode.placeholder)
+						.font(.body)
+						.foregroundStyle(.secondary)
+						.padding(.leading, 16)
+						.padding(.trailing, 16)
+						.padding(.vertical, 15)
+						.frame(maxWidth: .infinity, minHeight: 58, alignment: .topLeading)
+						.allowsHitTesting(false)
+				}
+
+				GenerationPromptTextView(
+					text: $model.query,
+					isFocused: generationInputFocusBinding,
+					placeholder: model.mode.placeholder,
+					onSubmit: submitQuery,
+					onPasteImages: importPastedGenerationAssets
+				)
+				.padding(.leading, 16)
+				.padding(.trailing, model.query.isEmpty ? 16 : 46)
+				.padding(.vertical, 15)
+				.frame(minHeight: 58, alignment: .center)
+			}
+		} else {
+			TextField(model.mode.placeholder, text: $model.query, axis: .vertical)
+				.lineLimit(1...5)
+				.font(.body)
+				.padding(.leading, 16)
+				.padding(.trailing, model.query.isEmpty ? 16 : 46)
+				.padding(.vertical, 15)
+				.frame(minHeight: 58, alignment: .center)
+				.textInputAutocapitalization(model.mode == .search ? .never : .sentences)
+				.autocorrectionDisabled(model.mode == .search)
+				.submitLabel(model.mode == .search ? .search : .done)
+				.focused($inputFocused)
+				.onSubmit {
+					submitQuery()
+				}
+				.onChange(of: model.query) { _, value in
+					submitIfKeyboardInsertedNewline(value)
+				}
+		}
+	}
+
+	private var generationInputFocusBinding: Binding<Bool> {
+		Binding(
+			get: { generationInputFocused },
+			set: { generationInputFocused = $0 }
+		)
+	}
+
+	private func focusPromptInput(allowsImagePaste: Bool) {
+		if allowsImagePaste {
+			generationInputFocused = true
+		} else {
+			inputFocused = true
+		}
+	}
+
 	private func submitQuery() {
 		if model.usesGeneratedStage {
 			model.submitGeneratedStage(mode: generatedPromptMode, sourceResult: currentGeneratedResult)
@@ -452,6 +500,7 @@ private struct MemeForgeView: View {
 			model.submit()
 		}
 		inputFocused = false
+		generationInputFocused = false
 	}
 
 	private func submitIfKeyboardInsertedNewline(_ value: String) {
@@ -509,6 +558,7 @@ private struct MemeForgeView: View {
 	private func importPickerItems(_ items: [PhotosPickerItem]) {
 		guard !items.isEmpty else { return }
 		inputFocused = false
+		generationInputFocused = false
 		Task {
 			var payloads: [SharedSettings.GenerationAssetPayload] = []
 			for item in items {
@@ -523,6 +573,12 @@ private struct MemeForgeView: View {
 				model.insertPickedGenerationAssets(payloads)
 			}
 		}
+	}
+
+	private func importPastedGenerationAssets(_ payloads: [SharedSettings.GenerationAssetPayload]) {
+		guard model.mode == .generate else { return }
+		generationInputFocused = false
+		model.insertPickedGenerationAssets(payloads)
 	}
 
 	private func openGenerationAsset(_ item: SharedSettings.GenerationAssetItem) {
@@ -573,6 +629,180 @@ private struct MemeForgeView: View {
 			model.copyImageData(imageData, pasteboardType: pasteboardType)
 		}
 	}
+}
+
+private struct GenerationPromptTextView: UIViewRepresentable {
+	@Binding var text: String
+	@Binding var isFocused: Bool
+
+	let placeholder: String
+	let onSubmit: () -> Void
+	let onPasteImages: ([SharedSettings.GenerationAssetPayload]) -> Void
+
+	func makeUIView(context: Context) -> PasteAwareTextView {
+		let textView = PasteAwareTextView()
+		textView.backgroundColor = .clear
+		textView.font = .preferredFont(forTextStyle: .body)
+		textView.adjustsFontForContentSizeCategory = true
+		textView.textColor = .label
+		textView.tintColor = .tintColor
+		textView.textContainerInset = .zero
+		textView.textContainer.lineFragmentPadding = 0
+		textView.returnKeyType = .done
+		textView.autocapitalizationType = .sentences
+		textView.autocorrectionType = .default
+		textView.delegate = context.coordinator
+		textView.imagePasteHandler = { [weak coordinator = context.coordinator] payloads in
+			coordinator?.pasteImages(payloads)
+		}
+		return textView
+	}
+
+	func updateUIView(_ textView: PasteAwareTextView, context: Context) {
+		context.coordinator.parent = self
+		textView.imagePasteEnabled = true
+		textView.accessibilityLabel = placeholder
+		if textView.text != text {
+			textView.text = text
+		}
+		textView.invalidateIntrinsicContentSize()
+
+		if isFocused, !textView.isFirstResponder {
+			DispatchQueue.main.async {
+				textView.becomeFirstResponder()
+			}
+		} else if !isFocused, textView.isFirstResponder {
+			DispatchQueue.main.async {
+				textView.resignFirstResponder()
+			}
+		}
+	}
+
+	func sizeThatFits(_ proposal: ProposedViewSize, uiView: PasteAwareTextView, context: Context) -> CGSize? {
+		let width = proposal.width ?? uiView.bounds.width
+		guard width > 0 else { return nil }
+		let fittingSize = uiView.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
+		let lineHeight = uiView.font?.lineHeight ?? UIFont.preferredFont(forTextStyle: .body).lineHeight
+		let minHeight = ceil(lineHeight)
+		let maxHeight = ceil(lineHeight * 5)
+		let height = min(max(ceil(fittingSize.height), minHeight), maxHeight)
+		uiView.isScrollEnabled = fittingSize.height > maxHeight
+		return CGSize(width: width, height: height)
+	}
+
+	func makeCoordinator() -> Coordinator {
+		Coordinator(parent: self)
+	}
+
+	@MainActor
+	final class Coordinator: NSObject, UITextViewDelegate {
+		var parent: GenerationPromptTextView
+
+		init(parent: GenerationPromptTextView) {
+			self.parent = parent
+		}
+
+		func textViewDidChange(_ textView: UITextView) {
+			parent.text = textView.text
+			textView.invalidateIntrinsicContentSize()
+		}
+
+		func textViewDidBeginEditing(_ textView: UITextView) {
+			parent.isFocused = true
+		}
+
+		func textViewDidEndEditing(_ textView: UITextView) {
+			parent.isFocused = false
+		}
+
+		func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
+			guard text == "\n" else { return true }
+			parent.onSubmit()
+			return false
+		}
+
+		func pasteImages(_ payloads: [SharedSettings.GenerationAssetPayload]) {
+			parent.onPasteImages(payloads)
+		}
+	}
+}
+
+@MainActor
+private final class PasteAwareTextView: UITextView {
+	var imagePasteEnabled = false
+	var imagePasteHandler: ([SharedSettings.GenerationAssetPayload]) -> Void = { _ in }
+
+	override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+		if action == #selector(paste(_:)),
+			imagePasteEnabled,
+			Self.pasteboardContainsImage(.general)
+		{
+			return true
+		}
+		return super.canPerformAction(action, withSender: sender)
+	}
+
+	override func paste(_ sender: Any?) {
+		if imagePasteEnabled {
+			let payloads = Self.generationAssetPayloads(from: .general)
+			if !payloads.isEmpty {
+				imagePasteHandler(payloads)
+				return
+			}
+		}
+		super.paste(sender)
+	}
+
+	private static func pasteboardContainsImage(_ pasteboard: UIPasteboard) -> Bool {
+		pasteboard.hasImages || pasteboard.items.contains { item in
+			imagePasteboardTypes.contains { item[$0] != nil }
+		}
+	}
+
+	private static func generationAssetPayloads(from pasteboard: UIPasteboard) -> [SharedSettings.GenerationAssetPayload] {
+		let itemPayloads = pasteboard.items.compactMap(payload)
+		if !itemPayloads.isEmpty {
+			return itemPayloads
+		}
+		return pasteboard.images?.compactMap(SharedSettings.normalizedGenerationAssetPayload(from:)) ?? []
+	}
+
+	private static func payload(from item: [String: Any]) -> SharedSettings.GenerationAssetPayload? {
+		for type in imagePasteboardTypes {
+			guard let value = item[type], let payload = payload(from: value) else { continue }
+			return payload
+		}
+
+		for value in item.values {
+			guard let payload = payload(from: value) else { continue }
+			return payload
+		}
+
+		return nil
+	}
+
+	private static func payload(from value: Any) -> SharedSettings.GenerationAssetPayload? {
+		if let data = value as? Data {
+			return SharedSettings.normalizedGenerationAssetPayload(from: data)
+		}
+		if let image = value as? UIImage {
+			return SharedSettings.normalizedGenerationAssetPayload(from: image)
+		}
+		if let url = value as? URL, url.isFileURL, let data = try? Data(contentsOf: url) {
+			return SharedSettings.normalizedGenerationAssetPayload(from: data)
+		}
+		return nil
+	}
+
+	private static let imagePasteboardTypes = [
+		UTType.png.identifier,
+		UTType.jpeg.identifier,
+		"public.heic",
+		"public.heif",
+		UTType.tiff.identifier,
+		UTType.gif.identifier,
+		UTType.image.identifier,
+	]
 }
 
 private struct ModeTabs: View {

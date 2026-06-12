@@ -220,6 +220,10 @@ enum SharedSettings {
 
 	static func normalizedGenerationAssetPayload(from data: Data) -> GenerationAssetPayload? {
 		guard let image = UIImage(data: data) else { return nil }
+		return normalizedGenerationAssetPayload(from: image)
+	}
+
+	static func normalizedGenerationAssetPayload(from image: UIImage) -> GenerationAssetPayload? {
 		let normalized = image.resizedToFit(maxSide: generationAssetMaxSide)
 
 		if normalized.hasAlpha, let pngData = normalized.pngData() {
