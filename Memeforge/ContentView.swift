@@ -1503,27 +1503,15 @@ private struct SelectedGenerationAssetThumbnail: View {
 
 	var body: some View {
 		ZStack(alignment: .topTrailing) {
-			Group {
-				if let image = UIImage(data: asset.imageData) {
-					Image(uiImage: image)
-						.resizable()
-						.scaledToFill()
-				} else {
-					Image(systemName: "photo")
-						.font(.title2)
-						.foregroundStyle(.secondary)
-						.frame(maxWidth: .infinity, maxHeight: .infinity)
-				}
-			}
+			thumbnailImage
 			.frame(width: 64, height: 64)
 			.clipShape(RoundedRectangle(cornerRadius: 8))
 			.liquidGlassSurface(cornerRadius: 12, interactive: true)
-			.contentShape(RoundedRectangle(cornerRadius: 8))
-			.onTapGesture(perform: mention)
-			.onLongPressGesture(perform: preview)
-			.accessibilityLabel(asset.name)
-			.accessibilityHint("Tap to add mention. Long press to preview.")
-			.accessibilityAddTraits(.isButton)
+
+			thumbnailMentionHitArea
+				.accessibilityLabel(asset.name)
+				.accessibilityHint("Tap to add mention. Long press to preview.")
+				.accessibilityAddTraits(.isButton)
 
 			Button(action: remove) {
 				Image(systemName: "xmark")
@@ -1536,6 +1524,44 @@ private struct SelectedGenerationAssetThumbnail: View {
 			.padding(4)
 			.accessibilityLabel("Remove generation asset")
 		}
+	}
+
+	@ViewBuilder
+	private var thumbnailImage: some View {
+		if let image = UIImage(data: asset.imageData) {
+			Image(uiImage: image)
+				.resizable()
+				.scaledToFill()
+		} else {
+			Image(systemName: "photo")
+				.font(.title2)
+				.foregroundStyle(.secondary)
+				.frame(maxWidth: .infinity, maxHeight: .infinity)
+		}
+	}
+
+	private var thumbnailMentionHitArea: some View {
+		VStack(spacing: 0) {
+			HStack(spacing: 0) {
+				mentionHitRegion
+					.frame(width: 34, height: 30)
+
+				Color.clear
+					.frame(width: 30, height: 30)
+					.allowsHitTesting(false)
+			}
+
+			mentionHitRegion
+				.frame(width: 64, height: 34)
+		}
+		.frame(width: 64, height: 64)
+	}
+
+	private var mentionHitRegion: some View {
+		Color.clear
+			.contentShape(Rectangle())
+			.onTapGesture(perform: mention)
+			.onLongPressGesture(perform: preview)
 	}
 }
 

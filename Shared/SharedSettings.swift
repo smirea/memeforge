@@ -614,12 +614,31 @@ extension String {
 	}
 
 	func replacingTrailingGenerationAssetMention(with name: String) -> String {
+		guard !containsGenerationAssetMention(named: name) else { return self }
 		guard trailingGenerationAssetMentionQuery != nil,
 			let atIndex = lastIndex(of: "@")
 		else {
 			return isEmpty ? "@\(name) " : "\(self) @\(name) "
 		}
 		return "\(self[..<atIndex])@\(name) "
+	}
+
+	private func containsGenerationAssetMention(named name: String) -> Bool {
+		let mention = "@\(name)"
+		var searchStart = startIndex
+		let allowedCharacters = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
+
+		while let range = range(of: mention, range: searchStart..<endIndex) {
+			let startsAtBoundary = range.lowerBound == startIndex
+				|| self[index(before: range.lowerBound)].isWhitespace
+			let endsAtBoundary = range.upperBound == endIndex
+				|| !String(self[range.upperBound]).unicodeScalars.allSatisfy { allowedCharacters.contains($0) }
+			if startsAtBoundary && endsAtBoundary {
+				return true
+			}
+			searchStart = range.upperBound
+		}
+		return false
 	}
 }
 
