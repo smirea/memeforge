@@ -317,6 +317,9 @@ private struct MemeForgeView: View {
 	var body: some View {
 		VStack(spacing: 0) {
 			mainContent
+			.safeAreaInset(edge: .top, spacing: 0) {
+				selectedAssetsTopBar
+			}
 			.safeAreaInset(edge: .bottom, spacing: 0) {
 				bottomControls
 				.padding(.horizontal, 16)
@@ -431,7 +434,7 @@ private struct MemeForgeView: View {
 				}
 				.frame(maxWidth: .infinity, alignment: .leading)
 				.padding(.horizontal, contentHorizontalPadding)
-				.padding(.top, floatingSettingsButtonContentTopPadding)
+				.padding(.top, scrollContentTopPadding)
 				.padding(.bottom, 16)
 			}
 			.scrollDismissesKeyboard(.interactively)
@@ -442,6 +445,10 @@ private struct MemeForgeView: View {
 		hasTiledContent ? 0 : 16
 	}
 
+	private var scrollContentTopPadding: CGFloat {
+		showsSelectedAssetsTopBar ? 12 : floatingSettingsButtonContentTopPadding
+	}
+
 	private var hasTiledContent: Bool {
 		(showsActiveModelState && (!model.results.isEmpty || model.isLoading))
 			|| (screenMode == .generate && !model.visibleGenerationAssetCollection.isEmpty)
@@ -449,6 +456,49 @@ private struct MemeForgeView: View {
 
 	private var showsActiveModelState: Bool {
 		model.mode == screenMode
+	}
+
+	private var showsSelectedAssetsTopBar: Bool {
+		screenMode == .generate && !model.usesGeneratedStage && !selectedAssetsForTopBar.isEmpty
+	}
+
+	@ViewBuilder
+	private var selectedAssetsTopBar: some View {
+		if showsSelectedAssetsTopBar {
+			SelectedGenerationAssetsStrip(
+				assets: selectedAssetsForTopBar,
+				mention: { asset in
+					mentionSelectedGenerationAsset(asset)
+				},
+				preview: { asset in
+					fullScreenPreview = .selectedAsset(asset)
+				},
+				remove: { asset in
+					model.removeGenerationAsset(asset)
+				}
+			)
+			.padding(.horizontal, 16)
+			.padding(.top, 58)
+			.padding(.bottom, 8)
+			.background(.ultraThinMaterial)
+			.overlay(alignment: .bottom) {
+				Divider()
+			}
+			.transition(.move(edge: .top).combined(with: .opacity))
+		}
+	}
+
+	private var selectedAssetsForTopBar: [SelectedGenerationAsset] {
+		guard let mentionQuery = activeAssetMentionQuery else {
+			return model.selectedGenerationAssets
+		}
+		let trimmed = mentionQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+		guard !trimmed.isEmpty else {
+			return model.selectedGenerationAssets
+		}
+		return model.selectedGenerationAssets.filter { asset in
+			asset.name.lowercased().contains(trimmed)
+		}
 	}
 
 	private var bottomControls: some View {
@@ -488,17 +538,6 @@ private struct MemeForgeView: View {
 
 	private var inputArea: some View {
 		VStack(alignment: .leading, spacing: 10) {
-			if screenMode == .generate, !model.selectedGenerationAssets.isEmpty {
-				SelectedGenerationAssetsStrip(
-					assets: model.selectedGenerationAssets,
-					open: { asset in
-						fullScreenPreview = .selectedAsset(asset)
-					},
-					remove: { asset in
-						model.removeGenerationAsset(asset)
-					}
-				)
-			}
 			queryInputArea(showAssetPicker: true)
 		}
 		.onChange(of: pickerItems) { _, items in
@@ -509,61 +548,38 @@ private struct MemeForgeView: View {
 
 	private func queryInputArea(showAssetPicker: Bool) -> some View {
 		VStack(alignment: .leading, spacing: 10) {
-			ZStack(alignment: .bottomLeading) {
-				HStack(alignment: .center, spacing: 10) {
-					ZStack(alignment: .trailing) {
-						promptInputField(allowsImagePaste: screenMode == .generate && showAssetPicker)
+			HStack(alignment: .center, spacing: 10) {
+				ZStack(alignment: .trailing) {
+					promptInputField(allowsImagePaste: screenMode == .generate && showAssetPicker)
 
-						if !model.query.isEmpty {
-							Button {
-								model.clearQuery()
-								focusPromptInput(allowsImagePaste: screenMode == .generate && showAssetPicker)
-							} label: {
-								Image(systemName: "xmark.circle.fill")
-									.font(.body)
-									.foregroundStyle(.secondary)
-									.frame(width: 36, height: 36)
-							}
-							.buttonStyle(.plain)
-							.padding(.trailing, 6)
-							.accessibilityLabel("Clear")
-						}
-					}
-					.liquidGlassSurface(cornerRadius: 22, interactive: true)
-
-					if screenMode == .generate, showAssetPicker {
-						PhotosPicker(selection: $pickerItems, maxSelectionCount: nil, matching: .images) {
-							Image(systemName: "photo.stack")
-								.font(.title3.weight(.semibold))
-								.frame(width: 58, height: 58)
+					if !model.query.isEmpty {
+						Button {
+							model.clearQuery()
+							focusPromptInput(allowsImagePaste: screenMode == .generate && showAssetPicker)
+						} label: {
+							Image(systemName: "xmark.circle.fill")
+								.font(.body)
+								.foregroundStyle(.secondary)
+								.frame(width: 36, height: 36)
 						}
 						.buttonStyle(.plain)
-						.liquidGlassSurface(cornerRadius: 22, interactive: true)
-						.disabled(model.isLoading)
-						.accessibilityLabel("Add generation assets")
+						.padding(.trailing, 6)
+						.accessibilityLabel("Clear")
 					}
 				}
+				.liquidGlassSurface(cornerRadius: 22, interactive: true)
 
-				assetMentionPopup(allowsImagePaste: screenMode == .generate && showAssetPicker)
-			}
-		}
-	}
-
-	@ViewBuilder
-	private func assetMentionPopup(allowsImagePaste: Bool) -> some View {
-		if allowsImagePaste, let mentionQuery = activeAssetMentionQuery {
-			let options = model.generationAssetMentionOptions(matching: mentionQuery)
-			if !options.isEmpty {
-				GenerationAssetMentionPopup(
-					items: options,
-					selectedCollectionIDs: model.selectedGenerationAssetCollectionIDs
-				) { item in
-					selectAssetMention(item, allowsImagePaste: allowsImagePaste)
+				if screenMode == .generate, showAssetPicker {
+					PhotosPicker(selection: $pickerItems, maxSelectionCount: nil, matching: .images) {
+						Image(systemName: "photo.stack")
+							.font(.title3.weight(.semibold))
+							.frame(width: 58, height: 58)
+					}
+					.buttonStyle(.plain)
+					.liquidGlassSurface(cornerRadius: 22, interactive: true)
+					.disabled(model.isLoading)
+					.accessibilityLabel("Add generation assets")
 				}
-				.padding(.trailing, allowsImagePaste ? 68 : 0)
-				.padding(.bottom, 68)
-				.transition(.move(edge: .bottom).combined(with: .opacity))
-				.zIndex(2)
 			}
 		}
 	}
@@ -578,11 +594,10 @@ private struct MemeForgeView: View {
 		return mentionQuery
 	}
 
-	private func selectAssetMention(_ item: SharedSettings.GenerationAssetItem, allowsImagePaste: Bool) {
+	private func mentionSelectedGenerationAsset(_ asset: SelectedGenerationAsset) {
 		activateScreenModeIfNeeded()
-		model.query = model.query.replacingTrailingGenerationAssetMention(with: item.displayName)
-		model.insertGenerationAsset(item)
-		focusPromptInput(allowsImagePaste: allowsImagePaste)
+		model.query = model.query.replacingTrailingGenerationAssetMention(with: asset.name)
+		focusPromptInput(allowsImagePaste: true)
 	}
 
 	@ViewBuilder
@@ -1457,7 +1472,8 @@ private func resultGridColumns(for mode: MemeMode) -> [GridItem] {
 
 private struct SelectedGenerationAssetsStrip: View {
 	let assets: [SelectedGenerationAsset]
-	let open: (SelectedGenerationAsset) -> Void
+	let mention: (SelectedGenerationAsset) -> Void
+	let preview: (SelectedGenerationAsset) -> Void
 	let remove: (SelectedGenerationAsset) -> Void
 
 	var body: some View {
@@ -1465,7 +1481,9 @@ private struct SelectedGenerationAssetsStrip: View {
 			HStack(spacing: 8) {
 				ForEach(assets) { asset in
 					SelectedGenerationAssetThumbnail(asset: asset) {
-						open(asset)
+						mention(asset)
+					} preview: {
+						preview(asset)
 					} remove: {
 						remove(asset)
 					}
@@ -1479,30 +1497,33 @@ private struct SelectedGenerationAssetsStrip: View {
 
 private struct SelectedGenerationAssetThumbnail: View {
 	let asset: SelectedGenerationAsset
-	let open: () -> Void
+	let mention: () -> Void
+	let preview: () -> Void
 	let remove: () -> Void
 
 	var body: some View {
 		ZStack(alignment: .topTrailing) {
-			Button(action: open) {
-				Group {
-					if let image = UIImage(data: asset.imageData) {
-						Image(uiImage: image)
-							.resizable()
-							.scaledToFill()
-					} else {
-						Image(systemName: "photo")
-							.font(.title2)
-							.foregroundStyle(.secondary)
-							.frame(maxWidth: .infinity, maxHeight: .infinity)
-					}
+			Group {
+				if let image = UIImage(data: asset.imageData) {
+					Image(uiImage: image)
+						.resizable()
+						.scaledToFill()
+				} else {
+					Image(systemName: "photo")
+						.font(.title2)
+						.foregroundStyle(.secondary)
+						.frame(maxWidth: .infinity, maxHeight: .infinity)
 				}
-				.frame(width: 64, height: 64)
-				.clipShape(RoundedRectangle(cornerRadius: 8))
-				.liquidGlassSurface(cornerRadius: 12, interactive: true)
 			}
-			.buttonStyle(.plain)
+			.frame(width: 64, height: 64)
+			.clipShape(RoundedRectangle(cornerRadius: 8))
+			.liquidGlassSurface(cornerRadius: 12, interactive: true)
+			.contentShape(RoundedRectangle(cornerRadius: 8))
+			.onTapGesture(perform: mention)
+			.onLongPressGesture(perform: preview)
 			.accessibilityLabel(asset.name)
+			.accessibilityHint("Tap to add mention. Long press to preview.")
+			.accessibilityAddTraits(.isButton)
 
 			Button(action: remove) {
 				Image(systemName: "xmark")
@@ -1514,77 +1535,6 @@ private struct SelectedGenerationAssetThumbnail: View {
 			.liquidGlassSurface(cornerRadius: 11, interactive: true)
 			.padding(4)
 			.accessibilityLabel("Remove generation asset")
-		}
-	}
-}
-
-private struct GenerationAssetMentionPopup: View {
-	let items: [SharedSettings.GenerationAssetItem]
-	let selectedCollectionIDs: Set<UUID>
-	let select: (SharedSettings.GenerationAssetItem) -> Void
-
-	var body: some View {
-		ScrollView(.horizontal, showsIndicators: false) {
-			HStack(spacing: 8) {
-				ForEach(items) { item in
-					Button {
-						select(item)
-					} label: {
-						HStack(spacing: 8) {
-							GenerationAssetMentionThumbnail(item: item)
-
-							Text(item.displayName)
-								.font(.caption.weight(.semibold))
-								.foregroundStyle(.primary)
-								.lineLimit(1)
-								.frame(maxWidth: 160, alignment: .leading)
-
-							if selectedCollectionIDs.contains(item.id) {
-								Image(systemName: "checkmark.circle.fill")
-									.font(.caption.weight(.bold))
-									.foregroundStyle(Color.accentColor)
-							}
-						}
-						.padding(6)
-						.background {
-							RoundedRectangle(cornerRadius: 10)
-								.fill(selectedCollectionIDs.contains(item.id) ? Color.accentColor.opacity(0.16) : Color.clear)
-						}
-					}
-					.buttonStyle(.plain)
-					.accessibilityLabel("Use \(item.displayName)")
-				}
-			}
-			.padding(8)
-		}
-		.frame(maxWidth: .infinity, alignment: .leading)
-		.frame(height: 58)
-		.liquidGlassSurface(cornerRadius: 16, interactive: true)
-		.shadow(color: .black.opacity(0.18), radius: 12, x: 0, y: 6)
-	}
-}
-
-private struct GenerationAssetMentionThumbnail: View {
-	let item: SharedSettings.GenerationAssetItem
-	@State private var image: UIImage?
-
-	var body: some View {
-		Group {
-			if let image {
-				Image(uiImage: image)
-					.resizable()
-					.scaledToFill()
-			} else {
-				Image(systemName: "photo")
-					.font(.caption.weight(.semibold))
-					.foregroundStyle(.secondary)
-			}
-		}
-		.frame(width: 34, height: 34)
-		.background(Color(.secondarySystemBackground))
-		.clipShape(RoundedRectangle(cornerRadius: 7))
-		.task(id: item.id) {
-			image = SharedSettings.generationAssetData(for: item).flatMap(UIImage.init(data:))
 		}
 	}
 }
@@ -2622,7 +2572,7 @@ private final class MemeForgeModel {
 	private var historyUseCounts: [String: Int] = [:]
 
 	private let searchPageSize = 30
-	private let generationInstruction = "Create exactly one static meme image. Make it visually clear, funny, and ready to share."
+	private let generationInstruction = "Create exactly one static meme image. Make it visually clear, funny, and ready to share. When the prompt references @image-name, use the attachment labeled with that exact name."
 
 	init() {
 		sortOrder = MemeSortOrder(rawValue: SharedSettings.appMemeSortOrder) ?? .date
@@ -2768,17 +2718,6 @@ private final class MemeForgeModel {
 			selectedGenerationAssets[index].name = item.displayName
 		}
 		return item
-	}
-
-	func generationAssetMentionOptions(matching query: String) -> [SharedSettings.GenerationAssetItem] {
-		let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-		let items = generationAssetCollection.sorted {
-			$0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending
-		}
-		guard !trimmed.isEmpty else { return items }
-		return items.filter { item in
-			item.displayName.lowercased().contains(trimmed)
-		}
 	}
 
 	func deleteCollectionGenerationAsset(id: UUID) {
@@ -3237,14 +3176,17 @@ private final class MemeForgeModel {
 		var parts: [[String: Any]] = [
 			["text": idea],
 		]
-		parts.append(contentsOf: assets.map { asset in
-			[
-				"inlineData": [
-					"mimeType": asset.mimeType,
-					"data": asset.imageData.base64EncodedString(),
-				],
-			]
-		})
+		for asset in assets {
+			parts.append(["text": "Attachment @\(asset.name):"])
+			parts.append(
+				[
+					"inlineData": [
+						"mimeType": asset.mimeType,
+						"data": asset.imageData.base64EncodedString(),
+					],
+				]
+			)
+		}
 
 		let body: [String: Any] = [
 			"systemInstruction": [

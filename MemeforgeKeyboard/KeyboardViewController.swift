@@ -133,7 +133,7 @@ final class KeyboardViewController: UIInputViewController {
 	private var assetMentionVisible = false
 	private var selectedGenerationAssets: [SelectedGenerationAsset] = []
 	private var generationAssetCollection: [SharedSettings.GenerationAssetItem] = []
-	private var assetMentionItems: [SharedSettings.GenerationAssetItem] = []
+	private var assetMentionItems: [SelectedGenerationAsset] = []
 	private var screenSwipeGestureRecognizers: [UISwipeGestureRecognizer] = []
 	private let keyFeedback = UIImpactFeedbackGenerator(style: .light)
 
@@ -161,8 +161,8 @@ final class KeyboardViewController: UIInputViewController {
 	private let selectedAssetsHeight: CGFloat = 66
 	private let selectedAssetSide: CGFloat = 58
 	private let generatedStyles = [
-		"Classic photographic meme style.",
-		"Bold illustrated meme style.",
+		"Classic photographic meme style. When the prompt references @image-name, use the attachment labeled with that exact name.",
+		"Bold illustrated meme style. When the prompt references @image-name, use the attachment labeled with that exact name.",
 	]
 
 	private let modeControl = UISegmentedControl(items: ["Search", "Generate"])
@@ -1031,14 +1031,14 @@ final class KeyboardViewController: UIInputViewController {
 		rebuildAssetMentionButtons()
 	}
 
-	private func assetMentionOptions(matching query: String) -> [SharedSettings.GenerationAssetItem] {
+	private func assetMentionOptions(matching query: String) -> [SelectedGenerationAsset] {
 		let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-		let items = generationAssetCollection.sorted {
-			$0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending
+		let items = selectedGenerationAssets.sorted {
+			$0.name.localizedStandardCompare($1.name) == .orderedAscending
 		}
 		guard !trimmed.isEmpty else { return items }
-		return items.filter { item in
-			item.displayName.lowercased().contains(trimmed)
+		return items.filter { asset in
+			asset.name.lowercased().contains(trimmed)
 		}
 	}
 
@@ -1053,35 +1053,29 @@ final class KeyboardViewController: UIInputViewController {
 			return
 		}
 
-		let isDark = usesDarkAppearance
-		let selectedIDs = Set(selectedGenerationAssets.compactMap(\.collectionID))
-		for item in assetMentionItems {
-			let selected = selectedIDs.contains(item.id)
+		for asset in assetMentionItems {
 			let button = UIButton(type: .system)
 			var configuration = UIButton.Configuration.filled()
-			configuration.title = item.displayName
-			configuration.image = UIImage(systemName: selected ? "checkmark.circle.fill" : "photo")
+			configuration.title = asset.name
+			configuration.image = UIImage(systemName: "checkmark.circle.fill")
 			configuration.imagePadding = 6
 			configuration.cornerStyle = .capsule
 			configuration.contentInsets = NSDirectionalEdgeInsets(top: 7, leading: 10, bottom: 7, trailing: 12)
-			configuration.baseBackgroundColor = selected ? .systemBlue : (isDark ? UIColor(white: 0.22, alpha: 1) : .tertiarySystemBackground)
-			configuration.baseForegroundColor = selected || isDark ? .white : .label
+			configuration.baseBackgroundColor = .systemBlue
+			configuration.baseForegroundColor = .white
 			button.configuration = configuration
 			button.titleLabel?.font = .systemFont(ofSize: 13, weight: .bold)
 			button.heightAnchor.constraint(equalToConstant: 36).isActive = true
 			button.addAction(UIAction { [weak self] _ in
-				self?.selectAssetMention(item)
+				self?.selectAssetMention(asset)
 			}, for: .touchUpInside)
 			assetMentionStack.addArrangedSubview(button)
 		}
 		assetMentionScrollView.isHidden = false
 	}
 
-	private func selectAssetMention(_ item: SharedSettings.GenerationAssetItem) {
-		query = query.replacingTrailingGenerationAssetMention(with: item.displayName)
-		if !selectedGenerationAssets.contains(where: { $0.collectionID == item.id }) {
-			insertGenerationAsset(item)
-		}
+	private func selectAssetMention(_ asset: SelectedGenerationAsset) {
+		query = query.replacingTrailingGenerationAssetMention(with: asset.name)
 		queryDidChange()
 	}
 
@@ -1694,14 +1688,17 @@ final class KeyboardViewController: UIInputViewController {
 		var parts: [[String: Any]] = [
 			["text": idea],
 		]
-		parts.append(contentsOf: assets.map { asset in
-			[
-				"inlineData": [
-					"mimeType": asset.mimeType,
-					"data": asset.imageData.base64EncodedString(),
-				],
-			]
-		})
+		for asset in assets {
+			parts.append(["text": "Attachment @\(asset.name):"])
+			parts.append(
+				[
+					"inlineData": [
+						"mimeType": asset.mimeType,
+						"data": asset.imageData.base64EncodedString(),
+					],
+				]
+			)
+		}
 
 		let body: [String: Any] = [
 			"systemInstruction": [
