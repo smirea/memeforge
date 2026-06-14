@@ -357,6 +357,7 @@ private struct MemeForgeView: View {
 			FullScreenImagePreview(
 				item: item,
 				selection: previewSelectionAction(for: item),
+				rename: previewRenameAction(for: item),
 				delete: item.canDelete ? {
 					deletePreviewItem(item)
 				} : nil,
@@ -508,40 +509,80 @@ private struct MemeForgeView: View {
 
 	private func queryInputArea(showAssetPicker: Bool) -> some View {
 		VStack(alignment: .leading, spacing: 10) {
-			HStack(alignment: .center, spacing: 10) {
-				ZStack(alignment: .trailing) {
-					promptInputField(allowsImagePaste: screenMode == .generate && showAssetPicker)
+			ZStack(alignment: .bottomLeading) {
+				HStack(alignment: .center, spacing: 10) {
+					ZStack(alignment: .trailing) {
+						promptInputField(allowsImagePaste: screenMode == .generate && showAssetPicker)
 
-					if !model.query.isEmpty {
-						Button {
-							model.clearQuery()
-							focusPromptInput(allowsImagePaste: screenMode == .generate && showAssetPicker)
-						} label: {
-							Image(systemName: "xmark.circle.fill")
-								.font(.body)
-								.foregroundStyle(.secondary)
-								.frame(width: 36, height: 36)
+						if !model.query.isEmpty {
+							Button {
+								model.clearQuery()
+								focusPromptInput(allowsImagePaste: screenMode == .generate && showAssetPicker)
+							} label: {
+								Image(systemName: "xmark.circle.fill")
+									.font(.body)
+									.foregroundStyle(.secondary)
+									.frame(width: 36, height: 36)
+							}
+							.buttonStyle(.plain)
+							.padding(.trailing, 6)
+							.accessibilityLabel("Clear")
+						}
+					}
+					.liquidGlassSurface(cornerRadius: 22, interactive: true)
+
+					if screenMode == .generate, showAssetPicker {
+						PhotosPicker(selection: $pickerItems, maxSelectionCount: nil, matching: .images) {
+							Image(systemName: "photo.stack")
+								.font(.title3.weight(.semibold))
+								.frame(width: 58, height: 58)
 						}
 						.buttonStyle(.plain)
-						.padding(.trailing, 6)
-						.accessibilityLabel("Clear")
+						.liquidGlassSurface(cornerRadius: 22, interactive: true)
+						.disabled(model.isLoading)
+						.accessibilityLabel("Add generation assets")
 					}
 				}
-				.liquidGlassSurface(cornerRadius: 22, interactive: true)
 
-				if screenMode == .generate, showAssetPicker {
-					PhotosPicker(selection: $pickerItems, maxSelectionCount: nil, matching: .images) {
-						Image(systemName: "photo.stack")
-							.font(.title3.weight(.semibold))
-							.frame(width: 58, height: 58)
-					}
-					.buttonStyle(.plain)
-					.liquidGlassSurface(cornerRadius: 22, interactive: true)
-					.disabled(model.isLoading)
-					.accessibilityLabel("Add generation assets")
-				}
+				assetMentionPopup(allowsImagePaste: screenMode == .generate && showAssetPicker)
 			}
 		}
+	}
+
+	@ViewBuilder
+	private func assetMentionPopup(allowsImagePaste: Bool) -> some View {
+		if allowsImagePaste, let mentionQuery = activeAssetMentionQuery {
+			let options = model.generationAssetMentionOptions(matching: mentionQuery)
+			if !options.isEmpty {
+				GenerationAssetMentionPopup(
+					items: options,
+					selectedCollectionIDs: model.selectedGenerationAssetCollectionIDs
+				) { item in
+					selectAssetMention(item, allowsImagePaste: allowsImagePaste)
+				}
+				.padding(.trailing, allowsImagePaste ? 68 : 0)
+				.padding(.bottom, 68)
+				.transition(.move(edge: .bottom).combined(with: .opacity))
+				.zIndex(2)
+			}
+		}
+	}
+
+	private var activeAssetMentionQuery: String? {
+		guard screenMode == .generate,
+			generationInputFocused || inputFocused,
+			let mentionQuery = model.query.trailingGenerationAssetMentionQuery
+		else {
+			return nil
+		}
+		return mentionQuery
+	}
+
+	private func selectAssetMention(_ item: SharedSettings.GenerationAssetItem, allowsImagePaste: Bool) {
+		activateScreenModeIfNeeded()
+		model.query = model.query.replacingTrailingGenerationAssetMention(with: item.displayName)
+		model.insertGenerationAsset(item)
+		focusPromptInput(allowsImagePaste: allowsImagePaste)
 	}
 
 	@ViewBuilder
@@ -721,6 +762,22 @@ private struct MemeForgeView: View {
 				model.toggleGenerationAsset(collectionID: collectionID)
 			}
 		)
+	}
+
+	private func previewRenameAction(for item: FullScreenPreviewItem) -> ((String) -> String)? {
+		guard case .asset(_, let collectionID?, .collectionItem, _, _, _) = item else { return nil }
+		return { rawName in
+			renamePreviewItem(item, collectionID: collectionID, to: rawName)
+		}
+	}
+
+	private func renamePreviewItem(_ item: FullScreenPreviewItem, collectionID: UUID, to rawName: String) -> String {
+		guard let updatedItem = model.renameCollectionGenerationAsset(id: collectionID, to: rawName) else {
+			return item.title
+		}
+		let name = updatedItem.displayName
+		fullScreenPreview = item.renamed(to: name)
+		return name
 	}
 
 	private func deletePreviewItem(_ item: FullScreenPreviewItem) {
@@ -1445,7 +1502,7 @@ private struct SelectedGenerationAssetThumbnail: View {
 				.liquidGlassSurface(cornerRadius: 12, interactive: true)
 			}
 			.buttonStyle(.plain)
-			.accessibilityLabel("Selected generation asset")
+			.accessibilityLabel(asset.name)
 
 			Button(action: remove) {
 				Image(systemName: "xmark")
@@ -1457,6 +1514,77 @@ private struct SelectedGenerationAssetThumbnail: View {
 			.liquidGlassSurface(cornerRadius: 11, interactive: true)
 			.padding(4)
 			.accessibilityLabel("Remove generation asset")
+		}
+	}
+}
+
+private struct GenerationAssetMentionPopup: View {
+	let items: [SharedSettings.GenerationAssetItem]
+	let selectedCollectionIDs: Set<UUID>
+	let select: (SharedSettings.GenerationAssetItem) -> Void
+
+	var body: some View {
+		ScrollView(.horizontal, showsIndicators: false) {
+			HStack(spacing: 8) {
+				ForEach(items) { item in
+					Button {
+						select(item)
+					} label: {
+						HStack(spacing: 8) {
+							GenerationAssetMentionThumbnail(item: item)
+
+							Text(item.displayName)
+								.font(.caption.weight(.semibold))
+								.foregroundStyle(.primary)
+								.lineLimit(1)
+								.frame(maxWidth: 160, alignment: .leading)
+
+							if selectedCollectionIDs.contains(item.id) {
+								Image(systemName: "checkmark.circle.fill")
+									.font(.caption.weight(.bold))
+									.foregroundStyle(Color.accentColor)
+							}
+						}
+						.padding(6)
+						.background {
+							RoundedRectangle(cornerRadius: 10)
+								.fill(selectedCollectionIDs.contains(item.id) ? Color.accentColor.opacity(0.16) : Color.clear)
+						}
+					}
+					.buttonStyle(.plain)
+					.accessibilityLabel("Use \(item.displayName)")
+				}
+			}
+			.padding(8)
+		}
+		.frame(maxWidth: .infinity, alignment: .leading)
+		.frame(height: 58)
+		.liquidGlassSurface(cornerRadius: 16, interactive: true)
+		.shadow(color: .black.opacity(0.18), radius: 12, x: 0, y: 6)
+	}
+}
+
+private struct GenerationAssetMentionThumbnail: View {
+	let item: SharedSettings.GenerationAssetItem
+	@State private var image: UIImage?
+
+	var body: some View {
+		Group {
+			if let image {
+				Image(uiImage: image)
+					.resizable()
+					.scaledToFill()
+			} else {
+				Image(systemName: "photo")
+					.font(.caption.weight(.semibold))
+					.foregroundStyle(.secondary)
+			}
+		}
+		.frame(width: 34, height: 34)
+		.background(Color(.secondarySystemBackground))
+		.clipShape(RoundedRectangle(cornerRadius: 7))
+		.task(id: item.id) {
+			image = SharedSettings.generationAssetData(for: item).flatMap(UIImage.init(data:))
 		}
 	}
 }
@@ -1534,7 +1662,7 @@ private struct GenerationAssetCollectionCell: View {
 			image = SharedSettings.generationAssetData(for: item).flatMap(UIImage.init(data:))
 		}
 		.accessibilityElement(children: .ignore)
-		.accessibilityLabel("Saved generation asset")
+		.accessibilityLabel(item.displayName)
 		.accessibilityValue(isSelected ? "Selected" : "Not selected")
 		.accessibilityHint("Tap to select. Long press to preview.")
 		.accessibilityAddTraits(.isButton)
@@ -1697,12 +1825,28 @@ private enum FullScreenPreviewItem: Identifiable {
 		}
 	}
 
+	func renamed(to title: String) -> FullScreenPreviewItem {
+		switch self {
+		case .asset(let id, let collectionID, let deleteTarget, _, let imageData, let pasteboardType):
+			.asset(
+				id: id,
+				collectionID: collectionID,
+				deleteTarget: deleteTarget,
+				title: title,
+				imageData: imageData,
+				pasteboardType: pasteboardType
+			)
+		case .result, .historyAsset:
+			self
+		}
+	}
+
 	static func selectedAsset(_ asset: SelectedGenerationAsset) -> FullScreenPreviewItem {
 		.asset(
 			id: asset.id,
 			collectionID: asset.collectionID,
 			deleteTarget: .selectedThumbnail,
-			title: "Selected generation asset",
+			title: asset.name,
 			imageData: asset.imageData,
 			pasteboardType: UTType(mimeType: asset.mimeType)?.identifier ?? asset.mimeType
 		)
@@ -1713,7 +1857,7 @@ private enum FullScreenPreviewItem: Identifiable {
 			id: item.id,
 			collectionID: item.id,
 			deleteTarget: .collectionItem,
-			title: "Saved generation asset",
+			title: item.displayName,
 			imageData: imageData,
 			pasteboardType: UTType(mimeType: item.mimeType)?.identifier ?? item.mimeType
 		)
@@ -1734,9 +1878,33 @@ private struct FullScreenImagePreview: View {
 
 	let item: FullScreenPreviewItem
 	let selection: PreviewSelectionAction?
+	let rename: ((String) -> String)?
 	let delete: (() -> Void)?
 	let close: () -> Void
 	let copy: () -> Void
+
+	@State private var displayName: String
+	@State private var draftName: String
+	@State private var isRenaming = false
+	@FocusState private var renameFocused: Bool
+
+	init(
+		item: FullScreenPreviewItem,
+		selection: PreviewSelectionAction?,
+		rename: ((String) -> String)?,
+		delete: (() -> Void)?,
+		close: @escaping () -> Void,
+		copy: @escaping () -> Void
+	) {
+		self.item = item
+		self.selection = selection
+		self.rename = rename
+		self.delete = delete
+		self.close = close
+		self.copy = copy
+		_displayName = State(initialValue: item.title)
+		_draftName = State(initialValue: item.title)
+	}
 
 	var body: some View {
 		ZStack {
@@ -1759,10 +1927,16 @@ private struct FullScreenImagePreview: View {
 			.zIndex(1)
 		}
 		.statusBarHidden()
+		.onChange(of: item.title) { _, title in
+			displayName = title
+			if !isRenaming {
+				draftName = title
+			}
+		}
 	}
 
 	private var topControls: some View {
-		HStack {
+		HStack(alignment: .top, spacing: 12) {
 			if let delete {
 				controlButton(systemName: "trash.fill", accessibilityLabel: "Delete") {
 					delete()
@@ -1774,6 +1948,9 @@ private struct FullScreenImagePreview: View {
 				PreviewSelectionButton(isSelected: selection.isSelected) {
 					selection.toggle()
 				}
+			}
+			if let rename {
+				nameControl(rename: rename)
 			}
 		}
 	}
@@ -1811,6 +1988,84 @@ private struct FullScreenImagePreview: View {
 		.buttonStyle(.plain)
 		.contentShape(Circle())
 		.accessibilityLabel(accessibilityLabel)
+	}
+
+	private func nameControl(rename: @escaping (String) -> String) -> some View {
+		Group {
+			if isRenaming {
+				HStack(spacing: 8) {
+					TextField("image-name", text: $draftName)
+						.font(.subheadline.weight(.semibold))
+						.foregroundStyle(.white)
+						.tint(.white)
+						.textInputAutocapitalization(.never)
+						.autocorrectionDisabled()
+						.submitLabel(.done)
+						.focused($renameFocused)
+						.onSubmit {
+							commitRename(rename)
+						}
+
+					Button {
+						commitRename(rename)
+					} label: {
+						Image(systemName: "checkmark")
+							.font(.subheadline.weight(.bold))
+							.foregroundStyle(.white)
+							.frame(width: 28, height: 28)
+					}
+					.buttonStyle(.plain)
+					.accessibilityLabel("Save image name")
+				}
+				.padding(.leading, 12)
+				.padding(.trailing, 8)
+				.frame(width: 230, height: 44)
+				.background(.black.opacity(0.62), in: Capsule())
+				.overlay {
+					Capsule()
+						.stroke(.white.opacity(0.24), lineWidth: 1)
+				}
+				.onAppear {
+					DispatchQueue.main.async {
+						renameFocused = true
+					}
+				}
+			} else {
+				Button {
+					draftName = displayName
+					isRenaming = true
+				} label: {
+					HStack(spacing: 7) {
+						Text(displayName)
+							.font(.subheadline.weight(.semibold))
+							.foregroundStyle(.white)
+							.lineLimit(1)
+
+						Image(systemName: "pencil")
+							.font(.caption.weight(.bold))
+							.foregroundStyle(.white.opacity(0.82))
+					}
+					.padding(.horizontal, 14)
+					.frame(maxWidth: 230, minHeight: 44)
+					.background(.black.opacity(0.62), in: Capsule())
+					.overlay {
+						Capsule()
+							.stroke(.white.opacity(0.24), lineWidth: 1)
+					}
+				}
+				.buttonStyle(.plain)
+				.accessibilityLabel("Rename image")
+				.accessibilityValue(displayName)
+			}
+		}
+	}
+
+	private func commitRename(_ rename: (String) -> String) {
+		let name = rename(draftName)
+		displayName = name
+		draftName = name
+		isRenaming = false
+		renameFocused = false
 	}
 
 	private func closePreview() {
@@ -2428,6 +2683,14 @@ private final class MemeForgeModel {
 
 	func refreshGenerationAssetCollection() {
 		generationAssetCollection = SharedSettings.generationAssetCollection
+		for index in selectedGenerationAssets.indices {
+			guard let collectionID = selectedGenerationAssets[index].collectionID,
+				let item = generationAssetCollection.first(where: { $0.id == collectionID })
+			else {
+				continue
+			}
+			selectedGenerationAssets[index].name = item.displayName
+		}
 	}
 
 	func refreshGenerationHistory() {
@@ -2496,6 +2759,26 @@ private final class MemeForgeModel {
 	func removeGenerationAsset(collectionID: UUID) {
 		selectedGenerationAssets.removeAll { $0.collectionID == collectionID }
 		resetResults()
+	}
+
+	func renameCollectionGenerationAsset(id: UUID, to rawName: String) -> SharedSettings.GenerationAssetItem? {
+		guard let item = SharedSettings.renameGenerationAsset(id: id, to: rawName) else { return nil }
+		refreshGenerationAssetCollection()
+		for index in selectedGenerationAssets.indices where selectedGenerationAssets[index].collectionID == id {
+			selectedGenerationAssets[index].name = item.displayName
+		}
+		return item
+	}
+
+	func generationAssetMentionOptions(matching query: String) -> [SharedSettings.GenerationAssetItem] {
+		let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+		let items = generationAssetCollection.sorted {
+			$0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending
+		}
+		guard !trimmed.isEmpty else { return items }
+		return items.filter { item in
+			item.displayName.lowercased().contains(trimmed)
+		}
 	}
 
 	func deleteCollectionGenerationAsset(id: UUID) {
@@ -3200,13 +3483,15 @@ private struct CopyPayload: Sendable {
 private struct SelectedGenerationAsset: Identifiable, Hashable, Sendable {
 	let id: UUID
 	let collectionID: UUID?
+	var name: String
 	let imageData: Data
 	let mimeType: String
 	var useCount: Int
 
-	init(id: UUID = UUID(), collectionID: UUID?, imageData: Data, mimeType: String, useCount: Int) {
+	init(id: UUID = UUID(), collectionID: UUID?, name: String = "image", imageData: Data, mimeType: String, useCount: Int) {
 		self.id = id
 		self.collectionID = collectionID
+		self.name = name
 		self.imageData = imageData
 		self.mimeType = mimeType
 		self.useCount = useCount
@@ -3215,6 +3500,7 @@ private struct SelectedGenerationAsset: Identifiable, Hashable, Sendable {
 	init(collectionItem: SharedSettings.GenerationAssetItem, imageData: Data) {
 		self.init(
 			collectionID: collectionItem.id,
+			name: collectionItem.displayName,
 			imageData: imageData,
 			mimeType: collectionItem.mimeType,
 			useCount: collectionItem.useCount

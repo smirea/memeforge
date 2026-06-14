@@ -75,13 +75,15 @@ final class KeyboardViewController: UIInputViewController {
 	fileprivate struct SelectedGenerationAsset: Hashable {
 		let id: UUID
 		let collectionID: UUID?
+		var name: String
 		let imageData: Data
 		let mimeType: String
 		var useCount: Int
 
-		init(id: UUID = UUID(), collectionID: UUID?, imageData: Data, mimeType: String, useCount: Int) {
+		init(id: UUID = UUID(), collectionID: UUID?, name: String = "image", imageData: Data, mimeType: String, useCount: Int) {
 			self.id = id
 			self.collectionID = collectionID
+			self.name = name
 			self.imageData = imageData
 			self.mimeType = mimeType
 			self.useCount = useCount
@@ -90,6 +92,7 @@ final class KeyboardViewController: UIInputViewController {
 		init(collectionItem: SharedSettings.GenerationAssetItem, imageData: Data) {
 			self.init(
 				collectionID: collectionItem.id,
+				name: collectionItem.displayName,
 				imageData: imageData,
 				mimeType: collectionItem.mimeType,
 				useCount: collectionItem.useCount
@@ -127,8 +130,10 @@ final class KeyboardViewController: UIInputViewController {
 	private var historyUseCounts: [String: Int] = [:]
 	private var showingHistory = false
 	private var assetPickerVisible = false
+	private var assetMentionVisible = false
 	private var selectedGenerationAssets: [SelectedGenerationAsset] = []
 	private var generationAssetCollection: [SharedSettings.GenerationAssetItem] = []
+	private var assetMentionItems: [SharedSettings.GenerationAssetItem] = []
 	private var screenSwipeGestureRecognizers: [UISwipeGestureRecognizer] = []
 	private let keyFeedback = UIImpactFeedbackGenerator(style: .light)
 
@@ -152,6 +157,7 @@ final class KeyboardViewController: UIInputViewController {
 	private let maxAssetPickerKeyboardHeight: CGFloat = 720
 	private let containerVerticalPadding: CGFloat = 10
 	private let assetPickerControlsHeight: CGFloat = 34
+	private let assetMentionHeight: CGFloat = 44
 	private let selectedAssetsHeight: CGFloat = 66
 	private let selectedAssetSide: CGFloat = 58
 	private let generatedStyles = [
@@ -166,6 +172,8 @@ final class KeyboardViewController: UIInputViewController {
 	private let queryCaret = UIView()
 	private let queryClearButton = UIButton(type: .system)
 	private lazy var assetToggleButton = smallButton("photo.stack", action: #selector(showAssetPicker))
+	private let assetMentionScrollView = UIScrollView()
+	private let assetMentionStack = UIStackView()
 	private let assetPickerControls = UIStackView()
 	private lazy var addAssetButton = assetPickerButton(title: "Add", systemName: "plus", action: #selector(addAssetsTapped))
 	private let accessBox = UIView()
@@ -388,14 +396,33 @@ final class KeyboardViewController: UIInputViewController {
 		queryRow.addArrangedSubview(assetToggleButton)
 		rootStack.addArrangedSubview(queryRow)
 
-			assetPickerControls.axis = .horizontal
-			assetPickerControls.spacing = 8
-			assetPickerControls.alignment = .fill
-			assetPickerControls.distribution = .fillEqually
-			assetPickerControls.isHidden = true
-			assetPickerControls.addArrangedSubview(addAssetButton)
-			addAssetButton.heightAnchor.constraint(equalToConstant: assetPickerControlsHeight).isActive = true
-			rootStack.addArrangedSubview(assetPickerControls)
+		assetMentionScrollView.showsHorizontalScrollIndicator = false
+		assetMentionScrollView.showsVerticalScrollIndicator = false
+		assetMentionScrollView.alwaysBounceHorizontal = true
+		assetMentionScrollView.isHidden = true
+		assetMentionScrollView.heightAnchor.constraint(equalToConstant: assetMentionHeight).isActive = true
+		assetMentionStack.axis = .horizontal
+		assetMentionStack.spacing = 6
+		assetMentionStack.alignment = .center
+		assetMentionStack.translatesAutoresizingMaskIntoConstraints = false
+		assetMentionScrollView.addSubview(assetMentionStack)
+		NSLayoutConstraint.activate([
+			assetMentionStack.leadingAnchor.constraint(equalTo: assetMentionScrollView.contentLayoutGuide.leadingAnchor),
+			assetMentionStack.trailingAnchor.constraint(equalTo: assetMentionScrollView.contentLayoutGuide.trailingAnchor),
+			assetMentionStack.topAnchor.constraint(equalTo: assetMentionScrollView.contentLayoutGuide.topAnchor, constant: 4),
+			assetMentionStack.bottomAnchor.constraint(equalTo: assetMentionScrollView.contentLayoutGuide.bottomAnchor, constant: -4),
+			assetMentionStack.heightAnchor.constraint(equalTo: assetMentionScrollView.frameLayoutGuide.heightAnchor, constant: -8),
+		])
+		rootStack.addArrangedSubview(assetMentionScrollView)
+
+		assetPickerControls.axis = .horizontal
+		assetPickerControls.spacing = 8
+		assetPickerControls.alignment = .fill
+		assetPickerControls.distribution = .fillEqually
+		assetPickerControls.isHidden = true
+		assetPickerControls.addArrangedSubview(addAssetButton)
+		addAssetButton.heightAnchor.constraint(equalToConstant: assetPickerControlsHeight).isActive = true
+		rootStack.addArrangedSubview(assetPickerControls)
 		rootStack.addArrangedSubview(selectedAssetsCollectionView)
 
 		rootStack.addArrangedSubview(accessBox)
@@ -750,6 +777,7 @@ final class KeyboardViewController: UIInputViewController {
 		queryClearButton.tintColor = isDark ? UIColor(white: 0.75, alpha: 1) : UIColor.secondaryLabel
 		loadingIndicator.color = isDark ? .white : .secondaryLabel
 		applyQueryInputFocus(animated: false)
+		updateAssetMentionSuggestions()
 		updateAlphabetKeyTitles()
 	}
 
@@ -979,9 +1007,82 @@ final class KeyboardViewController: UIInputViewController {
 		}
 		assetToggleButton.isHidden = mode != .generate
 		accessBox.isHidden = hasFullAccess
+		updateAssetMentionSuggestions()
 		updateQueryBoxHeight()
 		updateCaretPosition()
 		updateContainerSizing()
+	}
+
+	private func updateAssetMentionSuggestions() {
+		guard mode == .generate,
+			typingControlsVisible,
+			hasFullAccess,
+			!assetPickerVisible,
+			let mentionQuery = query.trailingGenerationAssetMentionQuery
+		else {
+			assetMentionVisible = false
+			assetMentionItems = []
+			rebuildAssetMentionButtons()
+			return
+		}
+
+		assetMentionItems = assetMentionOptions(matching: mentionQuery)
+		assetMentionVisible = !assetMentionItems.isEmpty
+		rebuildAssetMentionButtons()
+	}
+
+	private func assetMentionOptions(matching query: String) -> [SharedSettings.GenerationAssetItem] {
+		let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+		let items = generationAssetCollection.sorted {
+			$0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending
+		}
+		guard !trimmed.isEmpty else { return items }
+		return items.filter { item in
+			item.displayName.lowercased().contains(trimmed)
+		}
+	}
+
+	private func rebuildAssetMentionButtons() {
+		for view in assetMentionStack.arrangedSubviews {
+			assetMentionStack.removeArrangedSubview(view)
+			view.removeFromSuperview()
+		}
+
+		guard assetMentionVisible else {
+			assetMentionScrollView.isHidden = true
+			return
+		}
+
+		let isDark = usesDarkAppearance
+		let selectedIDs = Set(selectedGenerationAssets.compactMap(\.collectionID))
+		for item in assetMentionItems {
+			let selected = selectedIDs.contains(item.id)
+			let button = UIButton(type: .system)
+			var configuration = UIButton.Configuration.filled()
+			configuration.title = item.displayName
+			configuration.image = UIImage(systemName: selected ? "checkmark.circle.fill" : "photo")
+			configuration.imagePadding = 6
+			configuration.cornerStyle = .capsule
+			configuration.contentInsets = NSDirectionalEdgeInsets(top: 7, leading: 10, bottom: 7, trailing: 12)
+			configuration.baseBackgroundColor = selected ? .systemBlue : (isDark ? UIColor(white: 0.22, alpha: 1) : .tertiarySystemBackground)
+			configuration.baseForegroundColor = selected || isDark ? .white : .label
+			button.configuration = configuration
+			button.titleLabel?.font = .systemFont(ofSize: 13, weight: .bold)
+			button.heightAnchor.constraint(equalToConstant: 36).isActive = true
+			button.addAction(UIAction { [weak self] _ in
+				self?.selectAssetMention(item)
+			}, for: .touchUpInside)
+			assetMentionStack.addArrangedSubview(button)
+		}
+		assetMentionScrollView.isHidden = false
+	}
+
+	private func selectAssetMention(_ item: SharedSettings.GenerationAssetItem) {
+		query = query.replacingTrailingGenerationAssetMention(with: item.displayName)
+		if !selectedGenerationAssets.contains(where: { $0.collectionID == item.id }) {
+			insertGenerationAsset(item)
+		}
+		queryDidChange()
 	}
 
 	private func clearRequestError() {
@@ -1024,6 +1125,7 @@ final class KeyboardViewController: UIInputViewController {
 		selectedAssetsCollectionView.isHidden = !assetPickerVisible || selectedGenerationAssets.isEmpty
 		keyboardRestoreButton.isHidden = visible
 		keyRowStacks.forEach { $0.isHidden = !visible }
+		updateAssetMentionSuggestions()
 		selectedAssetsCollectionView.reloadData()
 		collectionView.collectionViewLayout.invalidateLayout()
 		collectionView.reloadData()
@@ -1157,10 +1259,14 @@ final class KeyboardViewController: UIInputViewController {
 		queryRow.isHidden = !typingControlsVisible
 		collectionView.isScrollEnabled = (assetPickerVisible || mode == .search) && shouldShowCollection
 		collectionView.alwaysBounceVertical = collectionView.isScrollEnabled
+		assetMentionScrollView.isHidden = !assetMentionVisible
 
 		var visibleHeights = [topRowHeight]
 		if typingControlsVisible {
 			visibleHeights.append(queryBoxHeightConstraint?.constant ?? minQueryBoxHeight)
+		}
+		if assetMentionVisible {
+			visibleHeights.append(assetMentionHeight)
 		}
 		if assetPickerVisible {
 			visibleHeights.append(assetPickerControlsHeight)
@@ -1307,10 +1413,19 @@ final class KeyboardViewController: UIInputViewController {
 
 	private func refreshGenerationAssetCollection() {
 		generationAssetCollection = SharedSettings.generationAssetCollection
+		for index in selectedGenerationAssets.indices {
+			guard let collectionID = selectedGenerationAssets[index].collectionID,
+				let item = generationAssetCollection.first(where: { $0.id == collectionID })
+			else {
+				continue
+			}
+			selectedGenerationAssets[index].name = item.displayName
+		}
 		if assetPickerVisible {
 			collectionView.reloadData()
 			updateContainerSizing()
 		}
+		updateAssetMentionSuggestions()
 	}
 
 	private func insertPickedGenerationAssets(_ payloads: [SharedSettings.GenerationAssetPayload]) {
@@ -1943,7 +2058,7 @@ extension KeyboardViewController: UICollectionViewDataSource, UICollectionViewDe
 		if assetPickerVisible {
 			let item = generationAssetCollection[indexPath.item]
 			let result = MemeResult(
-				title: "Saved generation asset",
+				title: item.displayName,
 				previewURL: nil,
 				previewVideoURL: nil,
 				copyURL: nil,

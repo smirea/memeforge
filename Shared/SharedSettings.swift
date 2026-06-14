@@ -66,6 +66,7 @@ enum SharedSettings {
 	struct GenerationAssetItem: Codable, Equatable, Identifiable, Sendable {
 		var id: UUID
 		var filename: String
+		var name: String?
 		var mimeType: String
 		var addedAt: TimeInterval
 		var useCount: Int
@@ -208,9 +209,12 @@ enum SharedSettings {
 
 	static var generationAssetCollection: [GenerationAssetItem] {
 		guard let data = store.data(forKey: generationAssetCollectionKey),
-			let collection = try? JSONDecoder().decode([GenerationAssetItem].self, from: data)
+			var collection = try? JSONDecoder().decode([GenerationAssetItem].self, from: data)
 		else {
 			return []
+		}
+		if normalizeGenerationAssetCollection(&collection) {
+			saveGenerationAssetCollection(collection)
 		}
 		return collection.sorted { $0.addedAt > $1.addedAt }
 	}
@@ -268,6 +272,7 @@ enum SharedSettings {
 		let item = GenerationAssetItem(
 			id: id,
 			filename: filename,
+			name: uniqueGenerationAssetName("image", excluding: id, in: collection),
 			mimeType: payload.mimeType,
 			addedAt: Date().timeIntervalSince1970,
 			useCount: 0
@@ -281,6 +286,16 @@ enum SharedSettings {
 	static func generationAssetData(for item: GenerationAssetItem) -> Data? {
 		guard let url = generationAssetURL(for: item.filename) else { return nil }
 		return try? Data(contentsOf: url)
+	}
+
+	@discardableResult
+	static func renameGenerationAsset(id: UUID, to rawName: String) -> GenerationAssetItem? {
+		var collection = generationAssetCollection
+		guard let index = collection.firstIndex(where: { $0.id == id }) else { return nil }
+		collection[index].name = uniqueGenerationAssetName(rawName, excluding: id, in: collection)
+		let item = collection[index]
+		saveGenerationAssetCollection(collection)
+		return item
 	}
 
 	static func generationHistoryData(for asset: GenerationHistoryAsset) -> Data? {
@@ -414,6 +429,27 @@ enum SharedSettings {
 		return true
 	}
 
+	static func generationAssetKebabName(_ rawName: String) -> String {
+		let folded = rawName
+			.folding(options: [.diacriticInsensitive, .widthInsensitive], locale: .current)
+			.lowercased()
+
+		var result = ""
+		var pendingSeparator = false
+		for scalar in folded.unicodeScalars {
+			if CharacterSet.alphanumerics.contains(scalar) {
+				if pendingSeparator, !result.isEmpty {
+					result.append("-")
+				}
+				result.unicodeScalars.append(scalar)
+				pendingSeparator = false
+			} else if !result.isEmpty {
+				pendingSeparator = true
+			}
+		}
+		return result.isEmpty ? "image" : result
+	}
+
 	private static func bundledValue(forInfoKey key: String) -> String {
 		let value = Bundle.main.object(forInfoDictionaryKey: key) as? String
 		let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -429,6 +465,45 @@ enum SharedSettings {
 		let sorted = collection.sorted { $0.addedAt > $1.addedAt }
 		guard let data = try? JSONEncoder().encode(sorted) else { return }
 		store.set(data, forKey: generationAssetCollectionKey)
+	}
+
+	private static func normalizeGenerationAssetCollection(_ collection: inout [GenerationAssetItem]) -> Bool {
+		var changed = false
+		var usedNames: Set<String> = []
+		let indices = collection.indices.sorted { lhs, rhs in
+			if collection[lhs].addedAt != collection[rhs].addedAt {
+				return collection[lhs].addedAt < collection[rhs].addedAt
+			}
+			return collection[lhs].id.uuidString < collection[rhs].id.uuidString
+		}
+
+		for index in indices {
+			let normalized = uniqueGenerationAssetName(collection[index].name ?? "image", usedNames: usedNames)
+			usedNames.insert(normalized)
+			if collection[index].name != normalized {
+				collection[index].name = normalized
+				changed = true
+			}
+		}
+		return changed
+	}
+
+	private static func uniqueGenerationAssetName(_ rawName: String, excluding id: UUID, in collection: [GenerationAssetItem]) -> String {
+		let usedNames = Set(collection.compactMap { item in
+			item.id == id ? nil : item.displayName
+		})
+		return uniqueGenerationAssetName(rawName, usedNames: usedNames)
+	}
+
+	private static func uniqueGenerationAssetName(_ rawName: String, usedNames: Set<String>) -> String {
+		let baseName = generationAssetKebabName(rawName)
+		guard usedNames.contains(baseName) else { return baseName }
+
+		var suffix = 2
+		while usedNames.contains("\(baseName)-\(suffix)") {
+			suffix += 1
+		}
+		return "\(baseName)-\(suffix)"
 	}
 
 	private static func saveGenerationHistory(_ history: [GenerationHistoryItem]) {
@@ -515,6 +590,36 @@ private extension SharedSettings.GenerationHistoryItem {
 		item.steps.append(step)
 		item.updatedAt = updatedAt
 		return item
+	}
+}
+
+extension SharedSettings.GenerationAssetItem {
+	var displayName: String {
+		if let name, !name.isEmpty {
+			return name
+		}
+		let baseName = URL(fileURLWithPath: filename).deletingPathExtension().lastPathComponent
+		return SharedSettings.generationAssetKebabName(baseName)
+	}
+}
+
+extension String {
+	var trailingGenerationAssetMentionQuery: String? {
+		guard let atIndex = lastIndex(of: "@") else { return nil }
+		let query = self[index(after: atIndex)...]
+		guard query.rangeOfCharacter(from: .whitespacesAndNewlines) == nil else { return nil }
+		let allowedCharacters = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_"))
+		guard query.unicodeScalars.allSatisfy({ allowedCharacters.contains($0) }) else { return nil }
+		return String(query)
+	}
+
+	func replacingTrailingGenerationAssetMention(with name: String) -> String {
+		guard trailingGenerationAssetMentionQuery != nil,
+			let atIndex = lastIndex(of: "@")
+		else {
+			return isEmpty ? "@\(name) " : "\(self) @\(name) "
+		}
+		return "\(self[..<atIndex])@\(name) "
 	}
 }
 
