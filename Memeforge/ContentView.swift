@@ -111,6 +111,7 @@ struct ContentView: View {
 private enum MemeSortOrder: String, CaseIterable, Identifiable, Sendable {
 	case date
 	case count
+	case name
 
 	var id: Self { self }
 
@@ -120,6 +121,8 @@ private enum MemeSortOrder: String, CaseIterable, Identifiable, Sendable {
 			"Date"
 		case .count:
 			"Count"
+		case .name:
+			"Name"
 		}
 	}
 }
@@ -1619,6 +1622,17 @@ private struct GenerationAssetCollectionCell: View {
 					.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
 			}
 
+			Text(item.displayName)
+				.font(.caption.weight(.semibold))
+				.foregroundStyle(.white.opacity(0.92))
+				.lineLimit(1)
+				.minimumScaleFactor(0.75)
+				.padding(.horizontal, 7)
+				.padding(.vertical, 5)
+				.frame(maxWidth: .infinity, alignment: .leading)
+				.background(.black.opacity(0.34))
+				.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+
 			if isSelected {
 				Rectangle()
 					.stroke(Color.accentColor, lineWidth: 4)
@@ -2812,6 +2826,19 @@ private final class MemeForgeModel {
 				}
 				return lhs.offset < rhs.offset
 			}.map(\.element)
+		case .name:
+			return results.enumerated().sorted { lhs, rhs in
+				let titleOrder = lhs.element.title.localizedStandardCompare(rhs.element.title)
+				if titleOrder != .orderedSame {
+					return titleOrder == .orderedAscending
+				}
+				let lhsDate = lhs.element.sortDate ?? 0
+				let rhsDate = rhs.element.sortDate ?? 0
+				if lhsDate != rhsDate {
+					return lhsDate > rhsDate
+				}
+				return lhs.offset < rhs.offset
+			}.map(\.element)
 		}
 	}
 
@@ -2825,6 +2852,14 @@ private final class MemeForgeModel {
 			case .count:
 				if lhs.element.useCount != rhs.element.useCount {
 					return lhs.element.useCount > rhs.element.useCount
+				}
+				if lhs.element.addedAt != rhs.element.addedAt {
+					return lhs.element.addedAt > rhs.element.addedAt
+				}
+			case .name:
+				let nameOrder = lhs.element.displayName.localizedStandardCompare(rhs.element.displayName)
+				if nameOrder != .orderedSame {
+					return nameOrder == .orderedAscending
 				}
 				if lhs.element.addedAt != rhs.element.addedAt {
 					return lhs.element.addedAt > rhs.element.addedAt
